@@ -1,0 +1,62 @@
+================================================================================
+🌊 OPTIMAL LUMP CONDITIONS - North Shore Oahu
+Foilers ride: Turtle Bay → Sunset Beach (westward WITH wind)
+Best lumps: Eastward current OPPOSING ENE trade winds
+Analysis period: 2025-08-01 to 2025-08-08
+================================================================================
+
+📅 Day 1: Friday, August 01, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 2: Saturday, August 02, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 3: Sunday, August 03, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 4: Monday, August 04, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 5: Tuesday, August 05, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 6: Wednesday, August 06, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+📅 Day 7: Thursday, August 07, 2025
+------------------------------------------------------------
+03:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+04:21 PM | ⭐ EXCELLENT | Wind: 18.0kt@060° | Current: 0.5kt@075° | Enhancement: maximum
+
+================================================================================
+📊 SUMMARY STATISTICS
+================================================================================
+Total optimal periods found: 14
+⭐ Excellent conditions: 14
+
+🎯 TOP RECOMMENDATIONS:
+   1. Fri 08/01 at 03:21 PM - 18.0kt winds, 0.5kt eastward current
+   2. Fri 08/01 at 04:21 PM - 18.0kt winds, 0.5kt eastward current
+   3. Sat 08/02 at 03:21 PM - 18.0kt winds, 0.5kt eastward current
+
+🏆 PEAK CONDITION:
+    Friday, August 01 at 03:21 PM
+    Wind: 18.0kt @ 60°
+    Current: 0.5kt @ 75°
+    ⭐ EXCELLENT conditions - advanced level - Strong wave enhancement
+
+================================================================================
+Analysis complete - Data shows eastward tidal current periods
+================================================================================
