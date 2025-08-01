@@ -206,3 +206,86 @@
 2025-08-01 01:21:05,035 - __main__ - INFO - 📊 Analyzing optimal condition periods...
 2025-08-01 01:21:05,039 - analysis - INFO - Report saved to data/lumps_report_20250801.txt
 2025-08-01 01:21:05,040 - __main__ - INFO - Data saved to data/optimal_conditions_20250801.csv
+2025-08-01 01:26:25,896 - __main__ - INFO - Analysis period: 2025-08-01 to 2025-08-04
+2025-08-01 01:26:25,896 - __main__ - INFO - Time window: 06:00 - 19:00 HST
+2025-08-01 01:26:25,896 - __main__ - INFO - Target: Eastward current (060-120°) flowing INTO ENE trades (050-070°)
+2025-08-01 01:26:25,897 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): api.tidesandcurrents.noaa.gov:443
+2025-08-01 01:26:26,465 - urllib3.connectionpool - DEBUG - https://api.tidesandcurrents.noaa.gov:443 "GET /dpapi/prod/webapi/currentPredictionsDownload?id=HAI1112_26&start_date=2025-08-01&range=1&date_timeUnits=am%2Fpm&interval=MAX_SLACK&time_zone=LST_LDT&units=1&format=txt HTTP/1.1" 200 494
+2025-08-01 01:26:26,467 - data_sources - INFO - Data source 'noaa' is available
+2025-08-01 01:26:26,467 - data_sources - INFO - Data source 'pacioos' is available
+2025-08-01 01:26:26,468 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): www.ndbc.noaa.gov:443
+2025-08-01 01:26:26,889 - urllib3.connectionpool - DEBUG - https://www.ndbc.noaa.gov:443 "GET /data/realtime2/51201.txt HTTP/1.1" 200 16198
+2025-08-01 01:26:26,890 - data_sources - INFO - Data source 'ndbc' is available
+2025-08-01 01:26:26,890 - __main__ - INFO - Using data sources: noaa, pacioos, ndbc
+2025-08-01 01:26:26,890 - __main__ - INFO - 🔍 Searching for eastward current flow periods...
+2025-08-01 01:26:26,890 - data_sources - INFO - Collecting data from noaa
+2025-08-01 01:26:26,891 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): api.tidesandcurrents.noaa.gov:443
+2025-08-01 01:26:27,572 - urllib3.connectionpool - DEBUG - https://api.tidesandcurrents.noaa.gov:443 "GET /dpapi/prod/webapi/currentPredictionsDownload?id=HAI1112_26&start_date=2025-07-31&range=4&date_timeUnits=am%2Fpm&interval=MAX_SLACK&threshold=leEq&thresholdValue=&time_zone=LST_LDT&units=1&format=txt HTTP/1.1" 500 290
+2025-08-01 01:26:27,573 - data_sources - ERROR - NOAA API error: Status 500, Response: <!doctype html><html lang="en"><head><title>HTTP Status 500 – Internal Server Error</title><style type="text/css">body {font-family:Tahoma,Arial,sans-serif;} h1, h2, h3, b {color:white;background-colo
+2025-08-01 01:26:27,574 - data_sources - WARNING - No current data returned from HAI1112_26
+2025-08-01 01:26:27,575 - data_sources - WARNING - No data returned from noaa
+2025-08-01 01:26:27,575 - data_sources - INFO - Collecting data from pacioos
+2025-08-01 01:26:27,576 - data_sources - INFO - PacIOOS data fetching not fully implemented - requires specific API research
+2025-08-01 01:26:27,577 - data_sources - INFO - Collected 73 records from pacioos
+2025-08-01 01:26:27,577 - data_sources - INFO - Collecting data from ndbc
+2025-08-01 01:26:27,578 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): www.ndbc.noaa.gov:443
+2025-08-01 01:26:27,859 - urllib3.connectionpool - DEBUG - https://www.ndbc.noaa.gov:443 "GET /data/realtime2/51201.txt HTTP/1.1" 200 16198
+2025-08-01 01:26:27,864 - data_sources - INFO - Collected 18 records from ndbc
+2025-08-01 01:26:27,865 - data_sources - INFO - Found 19 periods of eastward flow
+2025-08-01 01:26:27,868 - data_sources - INFO - Found 15 optimal conditions for eastward current into ENE trades
+2025-08-01 01:26:27,869 - __main__ - INFO - 📊 Analyzing optimal condition periods...
+2025-08-01 01:26:27,873 - __main__ - INFO - Data saved to data/optimal_conditions_20250801.csv
+2025-08-01 01:29:24,826 - __main__ - INFO - Analysis period: 2025-08-01 to 2025-08-04
+2025-08-01 01:29:24,826 - __main__ - INFO - Time window: 06:00 - 19:00 HST
+2025-08-01 01:29:24,826 - __main__ - INFO - Target: Eastward current (060-120°) flowing INTO ENE trades (050-070°)
+2025-08-01 01:29:24,828 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): api.tidesandcurrents.noaa.gov:443
+2025-08-01 01:29:25,424 - urllib3.connectionpool - DEBUG - https://api.tidesandcurrents.noaa.gov:443 "GET /dpapi/prod/webapi/currentPredictionsDownload?id=HAI1112_26&start_date=2025-08-01&range=1&date_timeUnits=am%2Fpm&interval=MAX_SLACK&time_zone=LST_LDT&units=1&format=txt HTTP/1.1" 200 494
+2025-08-01 01:29:25,426 - data_sources - INFO - Data source 'noaa' is available
+2025-08-01 01:29:25,426 - data_sources - INFO - Data source 'pacioos' is available
+2025-08-01 01:29:25,428 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): www.ndbc.noaa.gov:443
+2025-08-01 01:29:25,872 - urllib3.connectionpool - DEBUG - https://www.ndbc.noaa.gov:443 "GET /data/realtime2/51201.txt HTTP/1.1" 200 16198
+2025-08-01 01:29:25,882 - data_sources - INFO - Data source 'ndbc' is available
+2025-08-01 01:29:25,885 - __main__ - INFO - Using data sources: noaa, pacioos, ndbc
+2025-08-01 01:29:25,885 - __main__ - INFO - 🔍 Searching for eastward current flow periods...
+2025-08-01 01:29:25,885 - data_sources - INFO - Collecting data from noaa
+2025-08-01 01:29:25,886 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): api.tidesandcurrents.noaa.gov:443
+2025-08-01 01:29:26,302 - urllib3.connectionpool - DEBUG - https://api.tidesandcurrents.noaa.gov:443 "GET /dpapi/prod/webapi/currentPredictionsDownload?id=HAI1112_26&start_date=2025-07-31&range=4&interval=MAX_SLACK&time_zone=LST_LDT&units=1&format=txt HTTP/1.1" 500 290
+2025-08-01 01:29:26,303 - data_sources - ERROR - NOAA API error: Status 500, Response: <!doctype html><html lang="en"><head><title>HTTP Status 500 – Internal Server Error</title><style type="text/css">body {font-family:Tahoma,Arial,sans-serif;} h1, h2, h3, b {color:white;background-colo
+2025-08-01 01:29:26,303 - data_sources - WARNING - No current data returned from HAI1112_26
+2025-08-01 01:29:26,305 - data_sources - WARNING - No data returned from noaa
+2025-08-01 01:29:26,305 - data_sources - INFO - Collecting data from pacioos
+2025-08-01 01:29:26,306 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): pae-paha.pacioos.hawaii.edu:443
+2025-08-01 01:29:27,770 - urllib3.connectionpool - DEBUG - https://pae-paha.pacioos.hawaii.edu:443 "GET /erddap/griddap/roms_hiog.csv?v%5B(last)%5D%5B0.25%5D%5B(21.67):(21.71)%5D%5B((-158.1)):((-157.95))%5D&u%5B(last)%5D%5B0.25%5D%5B(21.67):(21.71)%5D%5B((-158.1)):((-157.95))%5D HTTP/1.1" 404 None
+2025-08-01 01:29:27,771 - data_sources - WARNING - PacIOOS ERDDAP request failed: 404
+2025-08-01 01:29:27,774 - data_sources - INFO - Using PacIOOS tidal simulation
+2025-08-01 01:29:27,775 - data_sources - INFO - Collected 73 records from pacioos
+2025-08-01 01:29:27,776 - data_sources - INFO - Collecting data from ndbc
+2025-08-01 01:29:27,776 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): www.ndbc.noaa.gov:443
+2025-08-01 01:29:28,067 - urllib3.connectionpool - DEBUG - https://www.ndbc.noaa.gov:443 "GET /data/realtime2/51201.txt HTTP/1.1" 200 16198
+2025-08-01 01:29:28,073 - data_sources - INFO - Collected 18 records from ndbc
+2025-08-01 01:29:28,074 - data_sources - INFO - Found 19 periods of eastward flow
+2025-08-01 01:29:28,078 - data_sources - INFO - Found 15 optimal conditions for eastward current into ENE trades
+2025-08-01 01:29:28,079 - __main__ - INFO - 📊 Analyzing optimal condition periods...
+2025-08-01 01:29:28,083 - __main__ - INFO - Data saved to data/optimal_conditions_20250801.csv
+2025-08-01 01:29:37,604 - __main__ - INFO - Analysis period: 2025-08-01 to 2025-08-03
+2025-08-01 01:29:37,605 - __main__ - INFO - Time window: 06:00 - 19:00 HST
+2025-08-01 01:29:37,605 - __main__ - INFO - Target: Eastward current (060-120°) flowing INTO ENE trades (050-070°)
+2025-08-01 01:29:38,051 - data_sources - INFO - Data source 'noaa' is available
+2025-08-01 01:29:38,051 - data_sources - INFO - Data source 'pacioos' is available
+2025-08-01 01:29:38,349 - data_sources - INFO - Data source 'ndbc' is available
+2025-08-01 01:29:38,349 - __main__ - INFO - Using data sources: noaa, pacioos, ndbc
+2025-08-01 01:29:38,349 - __main__ - INFO - 🔍 Searching for eastward current flow periods...
+2025-08-01 01:29:38,350 - data_sources - INFO - Collecting data from noaa
+2025-08-01 01:29:38,774 - data_sources - ERROR - NOAA API error: Status 500, Response: <!doctype html><html lang="en"><head><title>HTTP Status 500 – Internal Server Error</title><style type="text/css">body {font-family:Tahoma,Arial,sans-serif;} h1, h2, h3, b {color:white;background-colo
+2025-08-01 01:29:38,774 - data_sources - WARNING - No current data returned from HAI1112_26
+2025-08-01 01:29:38,778 - data_sources - WARNING - No data returned from noaa
+2025-08-01 01:29:38,778 - data_sources - INFO - Collecting data from pacioos
+2025-08-01 01:29:40,239 - data_sources - WARNING - PacIOOS ERDDAP request failed: 404
+2025-08-01 01:29:40,240 - data_sources - INFO - Using PacIOOS tidal simulation
+2025-08-01 01:29:40,242 - data_sources - INFO - Collected 49 records from pacioos
+2025-08-01 01:29:40,243 - data_sources - INFO - Collecting data from ndbc
+2025-08-01 01:29:40,533 - data_sources - INFO - Collected 18 records from ndbc
+2025-08-01 01:29:40,534 - data_sources - INFO - Found 13 periods of eastward flow
+2025-08-01 01:29:40,537 - data_sources - INFO - Found 9 optimal conditions for eastward current into ENE trades
+2025-08-01 01:29:40,538 - __main__ - INFO - 📊 Analyzing optimal condition periods...
+2025-08-01 01:29:40,541 - __main__ - INFO - Data saved to data/optimal_conditions_20250801.csv
