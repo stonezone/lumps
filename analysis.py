@@ -98,8 +98,12 @@ class ConditionAnalyzer:
                 'datetime': row['datetime'],
                 'wind_speed': row['wind_speed'],
                 'wind_dir': row['wind_dir'],
+                'wind_source': row.get('wind_source', 'Unknown'),
+                'wind_quality': row.get('wind_quality', 'Unknown'),
                 'current_speed': row['current_speed'],
                 'current_dir': row['current_dir'],
+                'current_source': row.get('current_source', 'Unknown'),
+                'current_quality': row.get('current_quality', 'Unknown'),
                 'quality': classification['quality'],
                 'skill_level': classification['skill_level'],
                 'recommendation': classification['recommendation'],
@@ -175,6 +179,10 @@ class ReportGenerator:
         report_lines.append("Foilers ride: Turtle Bay → Sunset Beach (westward WITH wind)")
         report_lines.append("Best lumps: Eastward current OPPOSING ENE trade winds")
         report_lines.append(f"Analysis period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        report_lines.append("")
+        report_lines.append("📊 DATA SOURCE LEGEND:")
+        report_lines.append("Wind: 📡=Observed (NDBC buoy) | 🌐=Forecast (OpenMeteo)")
+        report_lines.append("Current: 🌊=Model forecast (PacIOOS) | 🌙=Tidal predictions (NOAA) | 🔬=Simulation")
         report_lines.append("=" * 80)
         
         # Daily breakdown
@@ -199,11 +207,15 @@ class ReportGenerator:
                 emoji = self.quality_emojis.get(condition['quality'], '❓')
                 quality_label = condition['quality'].upper()
                 
+                # Add data source quality indicators
+                wind_quality_icon = "📡" if condition.get('wind_quality') == 'observed' else "🌐" if condition.get('wind_quality') == 'forecast' else "❓"
+                current_quality_icon = "🌊" if condition.get('current_quality') == 'model_forecast' else "🌙" if condition.get('current_quality') == 'tidal_predictions' else "🔬" if condition.get('current_quality') == 'simulation' else "❓"
+                
                 report_lines.append(
                     f"{dt.strftime('%I:%M %p')} | "
                     f"{emoji} {quality_label} | "
-                    f"Wind: {condition['wind_speed']:.1f}kt@{condition['wind_dir']:03.0f}° | "
-                    f"Current: {condition['current_speed']:.1f}kt@{condition['current_dir']:03.0f}° | "
+                    f"Wind: {wind_quality_icon}{condition['wind_speed']:.1f}kt@{condition['wind_dir']:03.0f}° | "
+                    f"Current: {current_quality_icon}{condition['current_speed']:.1f}kt@{condition['current_dir']:03.0f}° | "
                     f"Enhancement: {condition['enhancement']}"
                 )
         
