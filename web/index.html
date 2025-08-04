@@ -96,6 +96,68 @@
                 </div>
             </div>
 
+            <!-- Detailed Conditions -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="text-xl font-bold mb-4">Detailed Conditions</h3>
+                <div class="space-y-4 max-h-96 overflow-y-auto">
+                    <template x-for="condition in detailedConditions" :key="condition.datetime">
+                        <div class="border border-gray-600 rounded-lg p-4" :class="getConditionBorderClass(condition.quality)">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="font-mono text-sm" x-text="formatDateTime(condition.datetime)"></div>
+                                <div class="flex items-center space-x-2">
+                                    <span x-text="getQualityEmoji(condition.quality)"></span>
+                                    <span class="font-bold" :class="getQualityTextClass(condition.quality)" x-text="condition.quality.toUpperCase()"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                <div>
+                                    <div class="flex items-center space-x-2 mb-1">
+                                        <span x-text="trustEmoji[condition.wind_source] || '🌐'"></span>
+                                        <span class="font-medium">Wind:</span>
+                                        <span class="font-mono" x-text="condition.wind_speed + 'kt @ ' + condition.wind_dir + '°'"></span>
+                                    </div>
+                                    <div class="flex items-center space-x-2 mb-1">
+                                        <span x-text="trustEmoji[condition.current_source] || '🌊'"></span>
+                                        <span class="font-medium">Current:</span>
+                                        <span class="font-mono" x-text="condition.current_speed.toFixed(1) + 'kt @ ' + condition.current_dir.toFixed(0) + '°'"></span>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <span>🌊</span>
+                                        <span class="font-medium">Tide:</span>
+                                        <span class="font-mono" x-text="condition.tidal_phase"></span>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <div class="flex items-center space-x-2 mb-1">
+                                        <span>🎯</span>
+                                        <span class="font-medium">Score:</span>
+                                        <span class="font-mono" x-text="condition.scoring_debug"></span>
+                                    </div>
+                                    <div class="flex items-center space-x-2 mb-1" x-show="condition.is_true_eastward">
+                                        <span>✅</span>
+                                        <span class="text-green-400 font-medium">TRUE EASTWARD</span>
+                                    </div>
+                                    <div class="flex items-center space-x-2" x-show="!condition.is_true_eastward">
+                                        <span>❌</span>
+                                        <span class="text-gray-400">Not eastward</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-2 text-xs text-gray-400" x-text="condition.recommendation"></div>
+                        </div>
+                    </template>
+                    
+                    <div x-show="detailedConditions.length === 0" class="text-center text-gray-400 py-8">
+                        <div class="text-4xl mb-2">🌊</div>
+                        <div>No optimal conditions found</div>
+                        <div class="text-xs mt-1">Try a different date range or check back later</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Today's Timeline -->
             <div class="glass rounded-2xl p-6">
                 <h3 class="text-xl font-bold mb-4">Today's Timeline</h3>
@@ -136,6 +198,7 @@
                 error: false,
                 data: {},
                 forecast: [],
+                detailedConditions: [],
                 chart: null,
                 
                 trustEmoji: {
@@ -155,6 +218,7 @@
                         
                         this.data = await response.json();
                         this.generateForecast();
+                        this.generateDetailedConditions();
                         this.updateChart();
                         this.loading = false;
                     } catch (err) {
@@ -183,6 +247,43 @@
                             score: Math.round(avgScore * 10) / 10,
                             quality: this.getQualityFromScore(avgScore)
                         };
+                    });
+                },
+
+                generateDetailedConditions() {
+                    // Sort timeline by datetime and filter for quality conditions
+                    this.detailedConditions = (this.data.timeline || [])
+                        .filter(item => item.total_score > 0) // Only show conditions with some score
+                        .sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+                },
+
+                getConditionBorderClass(quality) {
+                    const q = quality.toLowerCase();
+                    if (q === 'prime') return 'border-red-400';
+                    if (q === 'excellent') return 'border-cyan-400';
+                    if (q === 'good') return 'border-green-400';
+                    if (q === 'moderate') return 'border-yellow-400';
+                    return 'border-gray-600';
+                },
+
+                getQualityTextClass(quality) {
+                    const q = quality.toLowerCase();
+                    if (q === 'prime') return 'text-red-400';
+                    if (q === 'excellent') return 'text-cyan-400';  
+                    if (q === 'good') return 'text-green-400';
+                    if (q === 'moderate') return 'text-yellow-400';
+                    return 'text-gray-400';
+                },
+
+                formatDateTime(dateStr) {
+                    if (!dateStr) return '';
+                    const date = new Date(dateStr);
+                    return date.toLocaleDateString('en-US', { 
+                        weekday: 'short', 
+                        month: 'short', 
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit'
                     });
                 },
 
