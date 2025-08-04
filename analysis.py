@@ -22,9 +22,9 @@ class ConditionAnalyzer:
         
     def classify_conditions(self, wind_speed: float, current_speed: float, 
                           interaction_type: str) -> Dict:
-        """Classify condition quality based on wind, current, and interaction"""
+        """EXPANDED condition classification for comprehensive downwind analysis"""
         
-        # Base classification on wind speed
+        # LOWERED wind speed thresholds to capture more viable conditions
         if wind_speed >= 22:
             base_quality = "prime"
             skill_level = "expert"
@@ -34,32 +34,58 @@ class ConditionAnalyzer:
         elif wind_speed >= 15:
             base_quality = "good"
             skill_level = "intermediate"
+        elif wind_speed >= 12:  # LOWERED from 15 to include light wind conditions
+            base_quality = "moderate"
+            skill_level = "intermediate_light"
+        elif wind_speed >= 8:   # ADDED new category for very light conditions
+            base_quality = "light"
+            skill_level = "experienced_light"
         else:
             base_quality = "marginal"
-            skill_level = "beginner"
+            skill_level = "calm_conditions"
         
-        # Enhance based on current strength and interaction
-        if current_speed >= 0.5 and interaction_type == "current_into_wind":
-            if base_quality == "good":
-                base_quality = "excellent"
-            elif base_quality == "marginal":
-                base_quality = "good"
+        # Enhanced current-wind interaction bonuses (more generous)
+        interaction_bonus = False
+        if current_speed >= 0.05:  # Very low threshold for current sensitivity
+            if interaction_type.startswith("current_into_wind"):
+                interaction_bonus = True
+                if base_quality == "moderate":
+                    base_quality = "good"
+                elif base_quality == "light":
+                    base_quality = "moderate"
+                elif base_quality == "marginal":
+                    base_quality = "light"
+            elif interaction_type == "current_cross_wind" and current_speed >= 0.1:
+                interaction_bonus = True
+                # Cross flow can also enhance conditions
+                if base_quality == "light":
+                    base_quality = "moderate"
+            elif interaction_type == "current_with_wind" and current_speed >= 0.15:
+                interaction_bonus = True
+                # Following current can create rideable following seas
+                if base_quality == "moderate":
+                    base_quality = "good"
         
         return {
             'quality': base_quality,
             'skill_level': skill_level,
             'wind_speed': wind_speed,
             'current_speed': current_speed,
-            'recommendation': self._get_recommendation(base_quality, skill_level)
+            'interaction_bonus': interaction_bonus,
+            'recommendation': self._get_recommendation(base_quality, skill_level, interaction_bonus)
         }
     
-    def _get_recommendation(self, quality: str, skill_level: str) -> str:
+    def _get_recommendation(self, quality: str, skill_level: str, interaction_bonus: bool = False) -> str:
         """Generate text recommendation based on conditions"""
+        bonus_text = " + current interaction bonus" if interaction_bonus else ""
+        
         recommendations = {
-            'prime': f"🔥 PRIME conditions - {skill_level} level - Maximum wave enhancement",
-            'excellent': f"⭐ EXCELLENT conditions - {skill_level} level - Strong wave enhancement", 
-            'good': f"✅ GOOD conditions - {skill_level} level - Moderate wave enhancement",
-            'marginal': f"📝 MARGINAL conditions - {skill_level} level - Light wave enhancement"
+            'prime': f"🔥 PRIME conditions - {skill_level} level - Maximum wave enhancement{bonus_text}",
+            'excellent': f"⭐ EXCELLENT conditions - {skill_level} level - Strong wave enhancement{bonus_text}", 
+            'good': f"✅ GOOD conditions - {skill_level} level - Moderate wave enhancement{bonus_text}",
+            'moderate': f"🌀 MODERATE conditions - {skill_level} level - Light wave enhancement{bonus_text}",
+            'light': f"💨 LIGHT conditions - {skill_level} level - Subtle wave interaction{bonus_text}",
+            'marginal': f"😐 MARGINAL conditions - {skill_level} level - Minimal enhancement{bonus_text}"
         }
         return recommendations.get(quality, "Conditions analyzed")
     
@@ -161,7 +187,9 @@ class ReportGenerator:
             'prime': '🔥',
             'excellent': '⭐', 
             'good': '✅',
-            'marginal': '📝'
+            'moderate': '🌀',
+            'light': '💨',
+            'marginal': '😐'
         }
     
     def generate_summary_report(self, analysis: Dict, start_date: datetime, 

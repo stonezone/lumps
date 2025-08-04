@@ -1,5 +1,2 @@
 datetime,current_speed,current_dir,wind_speed,wind_dir,interaction,enhancement,flow_direction
-2025-08-01 15:29:37.604908,0.5097075862354696,75.32358620784899,18,60,"{'angle_difference': 15.32358620784899, 'interaction_type': 'current_into_wind', 'wave_enhancement': 'maximum', 'optimal_for_standing_waves': True}",maximum,sunset_to_turtle_bay
-2025-08-01 16:29:37.604908,0.5019919817195686,75.06639939065228,18,60,"{'angle_difference': 15.066399390652279, 'interaction_type': 'current_into_wind', 'wave_enhancement': 'maximum', 'optimal_for_standing_waves': True}",maximum,sunset_to_turtle_bay
-2025-08-02 15:29:37.604908,0.5097075862354696,75.32358620784899,18,60,"{'angle_difference': 15.32358620784899, 'interaction_type': 'current_into_wind', 'wave_enhancement': 'maximum', 'optimal_for_standing_waves': True}",maximum,sunset_to_turtle_bay
-2025-08-02 16:29:37.604908,0.5019919817195686,75.06639939065228,18,60,"{'angle_difference': 15.066399390652279, 'interaction_type': 'current_into_wind', 'wave_enhancement': 'maximum', 'optimal_for_standing_waves': True}",maximum,sunset_to_turtle_bay
+2025-08-03 09:00:00,0.07243719830974477,16.110560295332107,28.5,74,"{'angle_difference': 57.88943970466789, 'interaction_type': 'current_into_wind_moderate', 'wave_enhancement': 'good', 'optimal_for_standing_waves': True}",good,sunset_to_turtle_bay

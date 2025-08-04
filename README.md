@@ -31,7 +31,7 @@ pip install -r requirements.txt
 python lumps.py
 
 # Custom analysis period  
-python lumps.py --start-date 2025-06-16 --days 10
+python lumps.py --start-date 2025-06-16 --days 7
 
 # Only show 6 AM - 7 PM conditions
 python lumps.py --time-range 6-19
@@ -94,11 +94,11 @@ python lumps.py --verbose --save-report
 ## Command Line Options
 
 ```bash
-python run_analysis.py [options]
+python analysis.py [options]
 
 Options:
   --start-date YYYY-MM-DD    Start date for analysis (default: today)
-  --days N                   Number of days to analyze (default: 10)
+  --days N                   Number of days to analyze (default: 7)
   --time-range START-END     Time window in HST (default: 6-19)
   --output-dir DIR           Output directory (default: data)
   --verbose                  Detailed output and recommendations
@@ -112,7 +112,7 @@ Options:
 ~/code/lumps/
 ├── lumps_data_collector.py   # Main data collection and analysis
 ├── config.py                 # Configuration and parameters
-├── run_analysis.py           # Command-line interface
+├── analysis.py           # Command-line interface
 ├── requirements.txt          # Python dependencies
 ├── README.md                 # This file
 └── data/                     # Output directory

@@ -1,0 +1,2 @@
+datetime,current_speed,current_dir,current_source,current_quality,wind_speed,wind_dir,wind_source,wind_quality,interaction,enhancement,flow_direction
+2025-08-03 03:00:00,0.1003226840865429,8.61407192912742,PacIOOS_ROMS_Hawaii,model_forecast,28.1,67,OpenMeteo_Forecast,forecast,"{'angle_difference': 58.38592807087258, 'interaction_type': 'current_into_wind_moderate', 'wave_enhancement': 'maximum', 'tidal_enhancement': 0.2, 'optimal_for_standing_waves': True}",maximum,sunset_to_turtle_bay

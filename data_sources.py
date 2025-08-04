@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from io import StringIO
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +444,332 @@ class PacIOOSCurrentSource(DataSource):
         # Placeholder - would check actual PacIOOS endpoints
         return True
 
+@dataclass
+class SpatialBounds:
+    """Geographic bounding box for North Shore Oahu"""
+    lat_min: float = 21.59    # Southern boundary  
+    lat_max: float = 21.72    # Northern boundary
+    lon_min: float = -158.11  # Western boundary (Haleiwa)
+    lon_max: float = -157.97  # Eastern boundary (Kahuku Point)
+    depth: float = 0.25       # Near-surface layer
+
+
+class PacIOOSEnhancedCurrentSource(DataSource):
+    """Enhanced PacIOOS current source with hourly interpolation and daylight filtering
+    
+    Based on the proven working approach from fetch_pacioos_currents_v2_fixed.py
+    Uses ERDDAP CSV method that has been validated to work reliably.
+    """
+    
+    def __init__(self, use_hourly_interpolation=False, daylight_only=False):
+        self.use_hourly_interpolation = use_hourly_interpolation
+        self.daylight_only = daylight_only
+        self.bounds = SpatialBounds()
+        self.base_url = "https://pae-paha.pacioos.hawaii.edu/erddap/griddap/roms_hiig"
+        self.timezone_offset = -10  # Hawaii Standard Time
+        self.sleep_seconds = 1.0
+
+        
+    def _get_dataset_end_time(self) -> Optional[datetime]:
+        """Dynamically get dataset end time from ERDDAP dataset info"""
+        try:
+            # Get dataset info from ERDDAP
+            info_url = f"{self.base_url}.das"
+            response = requests.get(info_url, timeout=10)
+            
+            if response.status_code == 200:
+                # Parse DAS format to find time dimension max value
+                for line in response.text.split('\n'):
+                    if 'time_coverage_end' in line and '"' in line:
+                        # Extract timestamp from line like: time_coverage_end "2025-08-07T00:00:00Z";
+                        timestamp_str = line.split('"')[1]
+                        return pd.to_datetime(timestamp_str).to_pydatetime().replace(tzinfo=None)
+                        
+                # Fallback: look for time actual_range
+                for line in response.text.split('\n'):
+                    if 'actual_range' in line and 'time' in line:
+                        # Extract the second timestamp (end time)
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                end_timestamp = float(parts[-1].rstrip(';'))
+                                return datetime.utcfromtimestamp(end_timestamp)
+                            except (ValueError, IndexError):
+                                continue
+                                
+        except Exception as e:
+            logger.debug(f"Could not get dynamic dataset end time: {e}")
+            
+        return None
+        
+    def _build_url(self, variable: str, time_start: datetime, time_end: datetime) -> str:
+        """Construct an ERDDAP query URL for the given variable and time range"""
+        start_iso = time_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_iso = time_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        b = self.bounds
+        # Format: dataset.csv?var[(start):stride:(end)][(depth)][(lat_min):(lat_max)][(lon_min):(lon_max)]
+        url = (
+            f"{self.base_url}.csv?{variable}"
+            f"[({start_iso}):1:({end_iso})]"
+            f"[({b.depth})]"
+            f"[({b.lat_min}):1:({b.lat_max})]"
+            f"[({b.lon_min}):1:({b.lon_max})]"
+        )
+        return url
+
+    def _fetch_component(self, variable: str, time_start: datetime, time_end: datetime) -> pd.DataFrame:
+        """Retrieve one velocity component from ERDDAP for a time range"""
+        url = self._build_url(variable, time_start, time_end)
+        logger.debug(f"Requesting {variable} from {time_start} to {time_end}")
+        
+        try:
+            resp = requests.get(url, timeout=120)
+            resp.raise_for_status()
+            
+            # Parse CSV
+            csv_text = resp.text
+            df = pd.read_csv(StringIO(csv_text))
+            
+            if df.empty:
+                return pd.DataFrame()
+                
+            # Remove rows where time equals the string 'UTC' (units row)
+            df = df[df['time'] != 'UTC']
+            
+            # Convert ALL numeric columns properly to avoid string/int errors
+            numeric_cols = ['depth', 'latitude', 'longitude', variable]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+            # Rename the velocity column to avoid collision
+            if variable in df.columns:
+                df = df.rename(columns={variable: f"{variable}_velocity"})
+                
+            return df
+            
+        except Exception as exc:
+            logger.warning(f"Failed to fetch {variable} data: {exc}")
+            return pd.DataFrame()
+
+    def _chunk_time_ranges(self, start: datetime, end: datetime, hours_per_chunk: int = 24) -> List[Tuple[datetime, datetime]]:
+        """Split a larger time range into smaller chunks"""
+        ranges = []
+        current = start
+        while current < end:
+            chunk_end = min(current + timedelta(hours=hours_per_chunk), end)
+            ranges.append((current, chunk_end))
+            current = chunk_end
+        return ranges
+
+    def _merge_uv(self, u: pd.DataFrame, v: pd.DataFrame) -> pd.DataFrame:
+        """Merge u and v components on shared coordinates"""
+        if u is None or u.empty or v is None or v.empty:
+            return pd.DataFrame()
+            
+        merge_cols = ['time', 'depth', 'latitude', 'longitude']
+        try:
+            merged = pd.merge(
+                u,
+                v[merge_cols + ['v_velocity']],
+                on=merge_cols,
+                how='inner',
+            )
+            return merged
+        except Exception as exc:
+            logger.warning(f"Error merging components: {exc}")
+            return pd.DataFrame()
+
+    def _compute_speed_direction(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add current speed and direction columns derived from u and v components"""
+        if df is None or df.empty:
+            return df
+        
+        # Make a copy to avoid SettingWithCopyWarning
+        df = df.copy()
+        
+        # Calculate magnitude in m/s
+        df.loc[:, 'current_speed_ms'] = np.sqrt(df['u_velocity'] ** 2 + df['v_velocity'] ** 2)
+        
+        # Calculate direction in degrees (0° = North, 90° = East)
+        df.loc[:, 'current_direction_deg'] = np.degrees(np.arctan2(df['u_velocity'], df['v_velocity']))
+        df.loc[:, 'current_direction_deg'] = (df['current_direction_deg'] + 360) % 360
+        
+        # Convert to knots (1 m/s = 1.94384 knots) and standard current_speed field
+        df.loc[:, 'current_speed_knots'] = df['current_speed_ms'] * 1.94384
+        df.loc[:, 'current_speed'] = df['current_speed_knots']  # Standard field name
+        df.loc[:, 'current_dir'] = df['current_direction_deg']  # Standard field name
+        
+        return df
+
+    def _filter_daylight_hours(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Filter data to daylight hours only (6 AM - 6 PM HST)"""
+        if not self.daylight_only or df.empty:
+            return df
+        
+        # Make a copy to avoid SettingWithCopyWarning
+        df = df.copy()
+        
+        # Convert to Hawaii local time  
+        df.loc[:, 'local_time'] = df['time'] + pd.Timedelta(hours=self.timezone_offset)
+        df.loc[:, 'hour'] = df['local_time'].dt.hour
+        
+        # Filter to daylight hours
+        daylight_df = df[(df['hour'] >= 6) & (df['hour'] <= 18)].copy()
+        logger.info(f"Filtered to daylight hours: {len(daylight_df)} of {len(df)} records remain")
+        return daylight_df.sort_values(['time', 'latitude', 'longitude'])
+
+    def _interpolate_to_hourly(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Interpolate 3-hourly current data to hourly resolution"""
+        if not self.use_hourly_interpolation or df.empty:
+            return df
+        
+        # Handle duplicate time labels by keeping only the first occurrence
+        df_clean = df.drop_duplicates(subset=['time'], keep='first').copy()
+        
+        # Set time as index for resampling
+        df_indexed = df_clean.set_index('time')
+        
+        # Interpolate to hourly frequency
+        hourly_df = df_indexed.resample('1H').interpolate(method='linear')
+        
+        # Reset index and recalculate derived fields if needed
+        result = hourly_df.reset_index()
+        logger.info(f"Interpolated to hourly: {len(result)} records from {len(df_clean)} original")
+        return result
+
+    def _process_enhanced_data(self, merged_df: pd.DataFrame) -> pd.DataFrame:
+        """Process merged U/V data with enhanced features"""
+        if merged_df.empty:
+            return pd.DataFrame()
+        
+        # Convert string timestamps to pandas datetime
+        merged_df['time'] = pd.to_datetime(merged_df['time'])
+        
+        # Ensure velocity columns are numeric and remove NaN values
+        merged_df['u_velocity'] = pd.to_numeric(merged_df['u_velocity'], errors='coerce')
+        merged_df['v_velocity'] = pd.to_numeric(merged_df['v_velocity'], errors='coerce')
+        merged_df = merged_df.dropna(subset=['u_velocity', 'v_velocity'])
+        
+        if merged_df.empty:
+            return pd.DataFrame()
+        
+        # Compute speed and direction
+        processed_df = self._compute_speed_direction(merged_df)
+        
+        # Apply daylight filtering if enabled
+        if self.daylight_only:
+            processed_df = self._filter_daylight_hours(processed_df)
+        
+        # Apply hourly interpolation if enabled
+        if self.use_hourly_interpolation:
+            processed_df = self._interpolate_to_hourly(processed_df)
+        
+        # Convert to standard format for compatibility with existing system
+        if not processed_df.empty:
+            # Aggregate spatial data by timestamp to match existing format
+            aggregated_data = []
+            for timestamp in processed_df['time'].unique():
+                timestamp_data = processed_df[processed_df['time'] == timestamp]
+                
+                # Calculate spatial average of current speed
+                avg_speed = timestamp_data['current_speed'].mean()
+                
+                # For direction, use the direction from the grid point with strongest current
+                max_speed_idx = timestamp_data['current_speed'].idxmax()
+                representative_dir = timestamp_data.loc[max_speed_idx, 'current_dir']
+                
+                # Use representative lat/lon (center of grid approximately)
+                center_lat = timestamp_data['latitude'].median()
+                center_lon = timestamp_data['longitude'].median()
+                
+                aggregated_data.append({
+                    'datetime': timestamp,
+                    'current_speed': avg_speed,
+                    'current_dir': representative_dir,
+                    'latitude': center_lat,
+                    'longitude': center_lon,
+                    'u_component': timestamp_data['u_velocity'].mean(),
+                    'v_component': timestamp_data['v_velocity'].mean(),
+                    'source': 'PacIOOS_Enhanced'
+                })
+            
+            result_df = pd.DataFrame(aggregated_data)
+            logger.info(f"Enhanced processing complete: {len(result_df)} aggregated timestamps")
+            return result_df
+        
+        return pd.DataFrame()
+
+    def fetch_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Fetch PacIOOS current data using enhanced ERDDAP CSV approach"""
+        try:
+            logger.info("Starting enhanced PacIOOS current data fetch")
+            
+            # Check dataset boundaries to avoid 404 errors
+            dataset_end = self._get_dataset_end_time()
+            if dataset_end is None:
+                logger.warning("Could not determine PacIOOS dataset end time, using 7-day limit from now")
+                dataset_end = datetime.now() + timedelta(days=7)
+            
+            actual_end_date = min(end_date, dataset_end)
+            
+            if actual_end_date < end_date:
+                logger.info(f"Adjusting enhanced PacIOOS end date from {end_date.strftime('%Y-%m-%d')} to {actual_end_date.strftime('%Y-%m-%d')} (dataset boundary limit)")
+            
+            all_u = []
+            all_v = []
+            
+            # Fetch data in chunks to avoid timeouts
+            for t0, t1 in self._chunk_time_ranges(start_date, actual_end_date, 24):
+                u_chunk = self._fetch_component('u', t0, t1)
+                if not u_chunk.empty:
+                    all_u.append(u_chunk)
+                time.sleep(self.sleep_seconds)
+                
+                v_chunk = self._fetch_component('v', t0, t1)
+                if not v_chunk.empty:
+                    all_v.append(v_chunk)
+                time.sleep(self.sleep_seconds)
+
+            if not all_u or not all_v:
+                logger.warning("No U or V data retrieved from enhanced PacIOOS source")
+                return pd.DataFrame()
+                
+            logger.info(f"Combining {len(all_u)} U chunks and {len(all_v)} V chunks")
+            u_df = pd.concat(all_u, ignore_index=True)
+            v_df = pd.concat(all_v, ignore_index=True)
+            
+            merged = self._merge_uv(u_df, v_df)
+            if merged.empty:
+                logger.warning("Failed to merge U and V components")
+                return pd.DataFrame()
+                
+            logger.info(f"Merged data points: {len(merged)}")
+            
+            # Apply enhanced processing
+            result = self._process_enhanced_data(merged)
+            
+            if not result.empty:
+                logger.info(f"Enhanced PacIOOS fetch successful: {len(result)} final records")
+            else:
+                logger.warning("No data remaining after enhanced processing")
+                
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Enhanced PacIOOS fetch failed: {e}")
+            return pd.DataFrame()
+
+    def is_available(self) -> bool:
+        """Check PacIOOS ERDDAP server availability"""
+        try:
+            # Quick test request for a small time window
+            test_url = f"{self.base_url}.csv?u[(2025-08-01T00:00:00Z):(2025-08-01T03:00:00Z)][(0.25)][(21.6):(21.7)][(-158.1):(-158.0)]"
+            response = requests.get(test_url, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
+
 class NDFCBuoySource(DataSource):
     """NDBC buoy data for wave and wind conditions"""
     
@@ -707,12 +1035,12 @@ class TidalCurrentAnalyzer:
         logger.info(f"Generated {len(df)} hours of enhanced tidal current simulation")
         
         # Log statistics about flow patterns
-        eastward_periods = df[(df['current_dir'] >= 60) & (df['current_dir'] <= 120)]
+        eastward_periods = df[(df['current_dir'] >= 30) & (df['current_dir'] <= 150)]
         northward_periods = df[((df['current_dir'] >= 315) | (df['current_dir'] <= 45))]
         strong_ebb = df[df['tide_type'] == 'strong_ebb']
         
         logger.info(f"Simulation includes:")
-        logger.info(f"  {len(eastward_periods)} hours of eastward flow (60-120°)")
+        logger.info(f"  {len(eastward_periods)} hours of eastward flow (30-150°)")
         logger.info(f"  {len(northward_periods)} hours of northward flow (315-45°)")
         logger.info(f"  {len(strong_ebb)} hours of strong ebb tide")
         logger.info(f"  Average current speed: {df['current_speed'].mean():.2f} knots")
@@ -722,57 +1050,84 @@ class TidalCurrentAnalyzer:
     def find_eastward_flow_periods(self, current_data: pd.DataFrame) -> pd.DataFrame:
         """
         Find periods when current flows in directions favorable for North Shore foiling
-        Based on real PacIOOS data: includes northward (315-45°) and southeast (135-225°) flows
-        These create current-wind interactions that enhance wave conditions
+        EXPANDED CRITERIA: Any current that can interact with wind to create surfable conditions
         """
         try:
             if current_data.empty:
                 return pd.DataFrame()
             
-            # Updated flow criteria based on real North Shore current patterns:
-            # 1. Northward flow (315-45°): Most common in real data, interacts with ENE trades
-            # 2. Southeast flow (135-225°): Also present, creates different wave enhancement
-            # 3. Keep original eastward (60-120°) for compatibility with tidal simulation
-            favorable_mask = (
-                ((current_data['current_dir'] >= 315) | (current_data['current_dir'] <= 45)) |  # North
-                ((current_data['current_dir'] >= 135) & (current_data['current_dir'] <= 225)) |  # Southeast  
-                ((current_data['current_dir'] >= 60) & (current_data['current_dir'] <= 120))     # Eastward (simulation)
-            )
+            # COMPREHENSIVE flow criteria for downwind foiling:
+            # Accept ANY current direction that can create wave enhancement
+            # Focus on finding periods with measurable current speed (>0.05 kt)
+            # rather than restricting by direction
+            
+            # Minimum current speed threshold for viable wave interaction
+            min_current_speed = 0.05  # knots - very sensitive to detect all possible conditions
+            
+            # Accept all current directions but prioritize by interaction potential
+            favorable_mask = current_data['current_speed'] >= min_current_speed
             
             favorable_periods = current_data[favorable_mask].copy()
             
             if not favorable_periods.empty:
-                # Add analysis columns - classify flow type based on direction
+                # Enhanced classification including ALL flow types
                 def classify_flow_type(direction):
                     if 315 <= direction <= 360 or 0 <= direction <= 45:
                         return 'northward'
-                    elif 135 <= direction <= 225:
-                        return 'southeast'  
-                    elif 60 <= direction <= 120:
-                        return 'eastward'
+                    elif 45 < direction <= 135:
+                        return 'eastward'  
+                    elif 135 < direction <= 225:
+                        return 'southward'
+                    elif 225 < direction <= 315:
+                        return 'westward'
                     else:
-                        return 'other'
+                        return 'variable'
+                
+                def assess_interaction_potential(direction):
+                    """Assess how well current direction interacts with typical ENE trades (060°)"""
+                    # ENE trades typically 050-070°, use 060° as reference
+                    trade_wind_dir = 60
+                    angle_diff = abs(direction - trade_wind_dir)
+                    if angle_diff > 180:
+                        angle_diff = 360 - angle_diff
+                    
+                    # Current flowing into wind (small angle) = high potential
+                    # Current flowing with wind (large angle) = moderate potential  
+                    # Cross current = variable potential
+                    if angle_diff <= 30:
+                        return 'high_opposing'      # Current into wind - best for lumps
+                    elif angle_diff >= 150:
+                        return 'moderate_following' # Current with wind - still surfable
+                    else:
+                        return 'cross_flow'         # Cross current - variable enhancement
                 
                 favorable_periods['flow_type'] = favorable_periods['current_dir'].apply(classify_flow_type)
-                favorable_periods['toward_turtle_bay'] = True  # All favorable for foiling
+                favorable_periods['interaction_potential'] = favorable_periods['current_dir'].apply(assess_interaction_potential)
+                favorable_periods['toward_turtle_bay'] = True  # All current can affect foiling
                 
-                # Calculate directional component (keep for compatibility)
+                # Calculate eastward component for compatibility
                 favorable_periods['eastward_component'] = np.cos(
                     np.radians(favorable_periods['current_dir'] - 90)
                 )
                 
-                logger.info(f"Found {len(favorable_periods)} periods of favorable flow")
+                # Log comprehensive statistics
+                flow_types = favorable_periods['flow_type'].value_counts()
+                interaction_types = favorable_periods['interaction_potential'].value_counts()
+                
+                logger.info(f"Found {len(favorable_periods)} periods of current flow >= {min_current_speed} kt")
+                logger.info(f"Flow types: {dict(flow_types)}")
+                logger.info(f"Interaction potential: {dict(interaction_types)}")
                 
             return favorable_periods
             
         except Exception as e:
-            logger.error(f"Error analyzing eastward flow: {e}")
+            logger.error(f"Error analyzing current flow: {e}")
             return pd.DataFrame()
     
-    def analyze_current_wind_interaction(self, current_dir: float, wind_dir: float) -> Dict:
+    def analyze_current_wind_interaction(self, current_dir: float, wind_dir: float, datetime_obj: datetime = None) -> Dict:
         """
-        Analyze interaction between current and wind for wave enhancement
-        Optimal: Eastward current (060-120°) flowing INTO ENE trades (050-070°)
+        COMPREHENSIVE current-wind interaction analysis for ALL downwind conditions
+        Includes opposing, following, and cross flows that create surfable wave states
         """
         try:
             # Calculate angle between current and wind
@@ -780,42 +1135,264 @@ class TidalCurrentAnalyzer:
             if angle_diff > 180:
                 angle_diff = 360 - angle_diff
             
-            # For eastward current flowing into ENE winds:
-            # Small angle difference means current flowing into wind = good
-            if angle_diff <= 30:
-                interaction = "current_into_wind"
-                enhancement = "maximum"  # Best for standing waves
-            elif angle_diff <= 60:
-                interaction = "current_into_wind_moderate"
-                enhancement = "good"
-            elif angle_diff >= 150:
-                interaction = "current_with_wind"
-                enhancement = "minimal"
-            else:
+            # EXPANDED interaction categories for comprehensive analysis:
+            
+            if angle_diff <= 20:
+                interaction = "current_into_wind_strong"
+                base_enhancement = "maximum"  # Strongest opposing flow - best lumps
+                surfable = True
+            elif angle_diff <= 45:
+                interaction = "current_into_wind_moderate" 
+                base_enhancement = "excellent"  # Good opposing flow
+                surfable = True
+            elif angle_diff <= 90:
                 interaction = "current_cross_wind"
-                enhancement = "moderate"
+                base_enhancement = "good"  # Cross flow can still create good conditions
+                surfable = True
+            elif angle_diff <= 135:
+                interaction = "current_angled_with_wind"
+                base_enhancement = "moderate"  # Angled flow - variable conditions
+                surfable = True
+            else:  # angle_diff > 135
+                interaction = "current_with_wind"
+                base_enhancement = "good"  # Following flow can create different wave dynamics
+                surfable = True
+            
+            # Add tidal phase enhancement
+            tidal_enhancement = 0.0
+            if datetime_obj:
+                tidal_enhancement = self._calculate_tidal_phase_enhancement(datetime_obj)
+            
+            # Combine base enhancement with tidal phase
+            final_enhancement = self._combine_enhancements(base_enhancement, tidal_enhancement)
+            
+            # Determine if optimal for specific wave types
+            opposing_flow = angle_diff <= 45  # Current into wind
+            following_flow = angle_diff >= 135  # Current with wind
+            cross_flow = 45 < angle_diff < 135  # Cross current
             
             return {
                 'angle_difference': angle_diff,
                 'interaction_type': interaction,
-                'wave_enhancement': enhancement,
-                'optimal_for_standing_waves': interaction.startswith("current_into_wind")
+                'wave_enhancement': final_enhancement,
+                'tidal_enhancement': tidal_enhancement,
+                'optimal_for_standing_waves': opposing_flow,  # Traditional standing wave lumps
+                'optimal_for_following_waves': following_flow,  # Following sea enhancement
+                'optimal_for_cross_waves': cross_flow,  # Cross wave patterns
+                'surfable_conditions': surfable,  # Include ALL viable conditions
+                'enhancement_category': self._categorize_enhancement(final_enhancement)
             }
             
         except Exception as e:
             logger.error(f"Error analyzing current-wind interaction: {e}")
-            return {}
+            return {'surfable_conditions': False}
+    
+    def _categorize_enhancement(self, enhancement: str) -> str:
+        """Categorize wave enhancement for clearer reporting"""
+        if enhancement in ['maximum']:
+            return 'prime_enhancement'
+        elif enhancement in ['excellent', 'good']:
+            return 'strong_enhancement'  
+        elif enhancement in ['moderate']:
+            return 'moderate_enhancement'
+        else:
+            return 'light_enhancement'
+    
+    def _calculate_tidal_phase_enhancement(self, dt: datetime) -> float:
+        """
+        Calculate tidal phase enhancement factor based on proximity to high tide
+        High tide and 2 hours before are critical periods voyagers know matter
+        """
+        # Calculate approximate high tide times for this location (North Shore Oahu)
+        # Using tidal harmonic constants - high tide roughly every 12.42 hours
+        high_tide_times = self._get_daily_high_tide_estimates(dt.date())
+        
+        # Debug logging for tidal timing
+        logger.debug(f"High tide times for {dt.date()}: {[f'{ht:.1f}' for ht in high_tide_times]} hours")
+        
+        # Find time difference to nearest high tide
+        current_hour = dt.hour + dt.minute / 60.0
+        time_diffs = []
+        for ht in high_tide_times:
+            # Handle day boundary crossings
+            diff1 = abs(current_hour - ht)
+            diff2 = abs(current_hour - (ht + 24))  # Next day
+            diff3 = abs(current_hour - (ht - 24))  # Previous day
+            time_diffs.append(min(diff1, diff2, diff3))
+        
+        min_time_to_high_tide = min(time_diffs)
+        
+        logger.debug(f"At {dt.strftime('%H:%M')}, closest high tide is {min_time_to_high_tide:.1f}h away")
+        
+        # Apply enhancement based on proximity to high tide
+        if min_time_to_high_tide <= 0.5:  # Within 30 minutes of high tide
+            return 0.35  # Maximum enhancement at high tide
+        elif min_time_to_high_tide <= 1.0:  # Within 1 hour of high tide
+            return 0.25  # Strong enhancement near high tide
+        elif min_time_to_high_tide <= 2.0:  # Within 2 hours before high tide
+            return 0.20  # Good enhancement in the critical 2-hour window
+        elif min_time_to_high_tide <= 3.0:  # 1 hour after high tide
+            return 0.10  # Moderate enhancement post-high tide
+        else:
+            return 0.0   # No enhancement during other periods
+    
+    def _get_daily_high_tide_estimates(self, date_obj) -> List[float]:
+        """
+        Calculate approximate high tide times for a given date
+        Based on M2 lunar semi-diurnal tide (dominant component)
+        Returns list of hours (0-24) when high tides occur
+        """
+        # M2 constituent period: 12.4206 hours
+        # For North Shore Oahu, approximate high tide reference
+        # Using January 1, 2025 00:00 as a reference point with known tidal phase
+        
+        from datetime import date
+        reference_date = date(2025, 1, 1)
+        reference_high_tide_hour = 6.2  # Approximate high tide time on reference date
+        
+        # Calculate days since reference
+        days_since_ref = (date_obj - reference_date).days
+        
+        # M2 advances by about 50 minutes per day (24.8 hours / 2 tides per day)
+        daily_advance_hours = 0.833  # 50 minutes = 0.833 hours
+        
+        # Calculate first high tide of the day
+        first_high_tide = (reference_high_tide_hour + (days_since_ref * daily_advance_hours)) % 24
+        
+        # Second high tide is approximately 12.42 hours later
+        second_high_tide = (first_high_tide + 12.42) % 24
+        
+        return [first_high_tide, second_high_tide]
+    
+    def _combine_enhancements(self, base_enhancement: str, tidal_factor: float) -> str:
+        """
+        Combine base wave enhancement with tidal phase enhancement
+        """
+        enhancement_levels = {
+            "minimal": 1,
+            "moderate": 2, 
+            "good": 3,
+            "maximum": 4
+        }
+        
+        level_names = ["minimal", "moderate", "good", "maximum"]
+        
+        # Convert to numeric, add tidal enhancement, convert back
+        current_level = enhancement_levels.get(base_enhancement, 2)
+        
+        # Tidal enhancement can bump up one level if significant
+        if tidal_factor >= 0.12:
+            enhanced_level = min(current_level + 1, 4)
+        elif tidal_factor >= 0.06:
+            # Small boost but not enough to change category
+            enhanced_level = current_level
+        else:
+            enhanced_level = current_level
+        
+        return level_names[enhanced_level - 1]
+
+class NOAAWeatherBuoySource(DataSource):
+    """NOAA Weather Buoy data for additional wind coverage"""
+    
+    def __init__(self, station_id: str = "51201"):  # Waimea Bay
+        self.station_id = station_id
+        self.base_url = "https://www.ndbc.noaa.gov/data/realtime2/"
+        
+    def fetch_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Fetch additional NOAA weather buoy data with more historical coverage"""
+        try:
+            # Try standard current data first
+            std_url = f"{self.base_url}{self.station_id}.txt"
+            response = requests.get(std_url, timeout=30)
+            
+            if response.status_code != 200:
+                logger.warning(f"NOAA weather buoy {self.station_id} not available")
+                return pd.DataFrame()
+            
+            lines = response.text.strip().split('\n')
+            
+            # Parse NDBC meteorological data format
+            data_lines = []
+            for i, line in enumerate(lines):
+                if line.startswith('#YY') or line.startswith('#yr'):
+                    # Skip header and units lines
+                    data_lines = lines[i+2:]
+                    break
+            
+            if not data_lines:
+                return pd.DataFrame()
+            
+            # Parse recent records (up to 200 for better coverage)
+            records = []
+            for line in data_lines[:200]:  # Extended record count
+                parts = line.split()
+                if len(parts) >= 12:
+                    try:
+                        dt = datetime(
+                            int(parts[0]), int(parts[1]), int(parts[2]),
+                            int(parts[3]), int(parts[4])
+                        )
+                        
+                        # Filter to requested date range
+                        if start_date <= dt <= end_date:
+                            wind_dir = float(parts[5]) if parts[5] != 'MM' else np.nan
+                            wind_speed = float(parts[6]) if parts[6] != 'MM' else np.nan
+                            
+                            # Only include valid wind data
+                            if not (pd.isna(wind_dir) or pd.isna(wind_speed)):
+                                records.append({
+                                    'datetime': dt,
+                                    'wind_dir': wind_dir,
+                                    'wind_speed': wind_speed,
+                                    'air_temp': float(parts[13]) if len(parts) > 13 and parts[13] != 'MM' else np.nan,
+                                    'source': f'NOAA_Buoy_{self.station_id}'
+                                })
+                    except (ValueError, IndexError):
+                        continue
+            
+            df = pd.DataFrame(records)
+            if not df.empty:
+                logger.info(f"Collected {len(df)} wind records from NOAA weather buoy {self.station_id}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching NOAA weather buoy data: {e}")
+            return pd.DataFrame()
+    
+    def is_available(self) -> bool:
+        """Check if NOAA weather buoy is responding"""
+        try:
+            url = f"{self.base_url}{self.station_id}.txt"
+            response = requests.get(url, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
 
 class DataCollector:
     """Main data collection coordinator using multiple sources"""
     
-    def __init__(self):
-        self.sources = {
-            'noaa': NOAACurrentSource(),
-            'pacioos': PacIOOSCurrentSource(),
-            'ndbc': NDFCBuoySource(),
-            'openmeteo': OpenMeteoWindSource()
-        }
+    def __init__(self, use_enhanced_currents=False, hourly_interpolation=False, daylight_only=False):
+        # Initialize current sources with enhanced option
+        if use_enhanced_currents:
+            self.sources = {
+                'pacioos_enhanced': PacIOOSEnhancedCurrentSource(
+                    use_hourly_interpolation=hourly_interpolation,
+                    daylight_only=daylight_only
+                ),
+                'pacioos': PacIOOSCurrentSource(),  # Fallback
+                'noaa': NOAACurrentSource(),
+                'ndbc': NDFCBuoySource(),
+                'openmeteo': OpenMeteoWindSource(),
+                'noaa_weather': NOAAWeatherBuoySource()
+            }
+        else:
+            self.sources = {
+                'pacioos': PacIOOSCurrentSource(),
+                'noaa': NOAACurrentSource(),
+                'ndbc': NDFCBuoySource(),
+                'openmeteo': OpenMeteoWindSource(),
+                'noaa_weather': NOAAWeatherBuoySource()
+            }
         self.tidal_analyzer = TidalCurrentAnalyzer()
         
     def get_available_sources(self) -> List[str]:
@@ -878,14 +1455,17 @@ class DataCollector:
             logger.warning("No real current data available from APIs")
             current_source_quality = 'simulation'
         
-        # Get wind data from NDBC and Open-Meteo  
+        # Get wind data from multiple sources
         wind_data = all_data.get('ndbc', pd.DataFrame())
+        noaa_weather_data = all_data.get('noaa_weather', pd.DataFrame())
         openmeteo_wind_data = all_data.get('openmeteo', pd.DataFrame())
         
         # Smart wind data selection with quality prioritization
         wind_source_priority = []
         if not wind_data.empty:
             wind_source_priority.append(('ndbc', wind_data, 'observed'))
+        if not noaa_weather_data.empty:
+            wind_source_priority.append(('noaa_weather', noaa_weather_data, 'observed'))
         if not openmeteo_wind_data.empty:
             wind_source_priority.append(('openmeteo', openmeteo_wind_data, 'forecast'))
         
@@ -933,7 +1513,18 @@ class DataCollector:
                     wind_quality = 'observed'
                     logger.debug(f"Using NDBC wind data for {dt}")
             
-            # Priority 2: Open-Meteo forecast data (model forecast, good quality)
+            # Priority 2: NOAA Weather Buoy data (real observations, high quality)
+            if (wind_dir is None or pd.isna(wind_dir)) and not noaa_weather_data.empty:
+                time_diff = abs(noaa_weather_data['datetime'] - dt)
+                if time_diff.min() <= timedelta(hours=1):
+                    closest_wind = noaa_weather_data.loc[time_diff.idxmin()]
+                    wind_dir = closest_wind['wind_dir']
+                    wind_speed = closest_wind['wind_speed']
+                    wind_source = 'NOAA_Weather_Buoy'
+                    wind_quality = 'observed'
+                    logger.debug(f"Using NOAA weather buoy data for {dt}")
+            
+            # Priority 3: Open-Meteo forecast data (model forecast, good quality)
             if (wind_dir is None or pd.isna(wind_dir)) and not openmeteo_wind_data.empty:
                 time_diff = abs(openmeteo_wind_data['datetime'] - dt)
                 if time_diff.min() <= timedelta(hours=2):  # Allow 2-hour window for forecasts
@@ -949,13 +1540,13 @@ class DataCollector:
                 logger.warning(f"CRITICAL: No wind data available for {dt} - skipping this analysis point")
                 continue
             
-            # Analyze interaction
+            # Analyze interaction (now includes tidal phase enhancement)
             interaction = self.tidal_analyzer.analyze_current_wind_interaction(
-                current_row['current_dir'], wind_dir
+                current_row['current_dir'], wind_dir, dt
             )
             
-            # Only include if it's good for standing waves
-            if interaction.get('optimal_for_standing_waves', False):
+            # Include ALL surfable conditions - not just optimal standing waves
+            if interaction.get('surfable_conditions', False):
                 optimal_conditions.append({
                     'datetime': dt,
                     'current_speed': current_row['current_speed'],

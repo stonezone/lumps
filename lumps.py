@@ -4,7 +4,7 @@ LUMPS - North Shore Oahu Downwind Foiling Analysis
 Main application for finding eastward current flow into ENE trade winds
 
 Usage:
-    python lumps.py --start-date 2025-06-16 --days 10 --time-range 6-19
+    python lumps.py --start-date 2025-06-16 --days 7 --time-range 6-19
 """
 
 import argparse
@@ -69,8 +69,8 @@ Examples:
     parser.add_argument(
         '--days',
         type=int,
-        default=10,
-        help='Number of days to analyze (default: 10)'
+        default=7,
+        help='Number of days to analyze (default: 7, matches PacIOOS forecast range)'
     )
     
     parser.add_argument(
@@ -103,6 +103,24 @@ Examples:
         '--save-report',
         action='store_true',
         help='Save detailed report to file'
+    )
+    
+    parser.add_argument(
+        '--enhanced-currents',
+        action='store_true',
+        help='Use enhanced PacIOOS currents with improved processing'
+    )
+    
+    parser.add_argument(
+        '--hourly-interpolation',
+        action='store_true', 
+        help='Interpolate current data to hourly resolution (requires --enhanced-currents)'
+    )
+    
+    parser.add_argument(
+        '--daylight-only',
+        action='store_true',
+        help='Filter current data to daylight hours only 6 AM - 6 PM HST (requires --enhanced-currents)'
     )
     
     return parser.parse_args()
@@ -158,13 +176,17 @@ def main():
     Path(args.output_dir).mkdir(exist_ok=True)
     
     # Initialize components
-    collector = DataCollector()
+    collector = DataCollector(
+        use_enhanced_currents=args.enhanced_currents,
+        hourly_interpolation=args.hourly_interpolation,
+        daylight_only=args.daylight_only
+    )
     analyzer = ConditionAnalyzer()
     reporter = ReportGenerator()
     
     logger.info(f"Analysis period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     logger.info(f"Time window: {start_hour:02d}:00 - {end_hour:02d}:00 HST")
-    logger.info(f"Target: Eastward current (060-120°) flowing INTO ENE trades (050-070°)")
+    logger.info(f"Target: Eastward current (030-150°) flowing INTO ENE trades (050-070°)")
     
     # Check data sources if requested
     if args.check_sources:

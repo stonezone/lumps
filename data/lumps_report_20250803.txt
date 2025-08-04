@@ -1,0 +1,103 @@
+================================================================================
+🌊 OPTIMAL LUMP CONDITIONS - North Shore Oahu
+Foilers ride: Turtle Bay → Sunset Beach (westward WITH wind)
+Best lumps: Eastward current OPPOSING ENE trade winds
+Analysis period: 2025-08-03 to 2025-08-10
+
+📊 DATA SOURCE LEGEND:
+Wind: 📡=Observed (NDBC buoy) | 🌐=Forecast (OpenMeteo)
+Current: 🌊=Model forecast (PacIOOS) | 🌙=Tidal predictions (NOAA) | 🔬=Simulation
+================================================================================
+
+📅 Day 1: Monday, August 04, 2025
+------------------------------------------------------------
+12:00 AM | 🔥 PRIME | Wind: 🌐25.9kt@065° | Current: 🌊0.3kt@243° | Enhancement: good
+03:00 AM | 🔥 PRIME | Wind: 🌐26.1kt@066° | Current: 🌊0.5kt@308° | Enhancement: moderate
+06:00 AM | 🔥 PRIME | Wind: 🌐22.3kt@076° | Current: 🌊0.4kt@315° | Enhancement: good
+09:00 AM | 🔥 PRIME | Wind: 🌐24.2kt@079° | Current: 🌊0.4kt@312° | Enhancement: moderate
+12:00 PM | ✅ GOOD | Wind: 🌐17.6kt@079° | Current: 🌊0.4kt@314° | Enhancement: moderate
+03:00 PM | ✅ GOOD | Wind: 🌐16.9kt@088° | Current: 🌊0.2kt@322° | Enhancement: moderate
+06:00 PM | ⭐ EXCELLENT | Wind: 🌐19.1kt@089° | Current: 🌊0.1kt@003° | Enhancement: maximum
+
+📅 Day 2: Tuesday, August 05, 2025
+------------------------------------------------------------
+12:00 AM | 🔥 PRIME | Wind: 🌐23.7kt@066° | Current: 🌊0.1kt@215° | Enhancement: good
+03:00 AM | 🔥 PRIME | Wind: 🌐25.1kt@066° | Current: 🌊0.2kt@245° | Enhancement: good
+06:00 AM | ⭐ EXCELLENT | Wind: 🌐19.9kt@068° | Current: 🌊0.1kt@227° | Enhancement: maximum
+09:00 AM | ⭐ EXCELLENT | Wind: 🌐18.1kt@073° | Current: 🌊0.2kt@244° | Enhancement: good
+12:00 PM | 🌀 MODERATE | Wind: 🌐13.7kt@067° | Current: 🌊0.3kt@302° | Enhancement: moderate
+03:00 PM | 🌀 MODERATE | Wind: 🌐12.5kt@078° | Current: 🌊0.4kt@317° | Enhancement: moderate
+06:00 PM | 🌀 MODERATE | Wind: 🌐14.9kt@070° | Current: 🌊0.3kt@323° | Enhancement: good
+09:00 PM | ⭐ EXCELLENT | Wind: 🌐18.6kt@058° | Current: 🌊0.2kt@307° | Enhancement: moderate
+
+📅 Day 3: Wednesday, August 06, 2025
+------------------------------------------------------------
+12:00 AM | ⭐ EXCELLENT | Wind: 🌐19.3kt@053° | Current: 🌊0.2kt@246° | Enhancement: good
+03:00 AM | ⭐ EXCELLENT | Wind: 🌐19.9kt@046° | Current: 🌊0.2kt@226° | Enhancement: good
+06:00 AM | ✅ GOOD | Wind: 🌐17.2kt@057° | Current: 🌊0.1kt@349° | Enhancement: maximum
+09:00 AM | ✅ GOOD | Wind: 🌐17.9kt@060° | Current: 🌊0.1kt@151° | Enhancement: good
+12:00 PM | 🌀 MODERATE | Wind: 🌐12.6kt@063° | Current: 🌊0.1kt@158° | Enhancement: moderate
+09:00 PM | 🌀 MODERATE | Wind: 🌐12.7kt@029° | Current: 🌊0.1kt@189° | Enhancement: good
+
+📅 Day 4: Thursday, August 07, 2025
+------------------------------------------------------------
+12:00 AM | ✅ GOOD | Wind: 🌐13.3kt@019° | Current: 🌊0.3kt@213° | Enhancement: good
+03:00 AM | ✅ GOOD | Wind: 🌐14.6kt@033° | Current: 🌊0.4kt@236° | Enhancement: good
+06:00 AM | 🌀 MODERATE | Wind: 🌐12.1kt@053° | Current: 🌊0.3kt@320° | Enhancement: moderate
+09:00 AM | 😐 MARGINAL | Wind: 🌐7.5kt@073° | Current: 🌊0.1kt@006° | Enhancement: maximum
+12:00 PM | 😐 MARGINAL | Wind: 🌐5.1kt@086° | Current: 🌊0.2kt@152° | Enhancement: good
+03:00 PM | 😐 MARGINAL | Wind: 🌐6.3kt@077° | Current: 🌊0.2kt@147° | Enhancement: good
+06:00 PM | 💨 LIGHT | Wind: 🌐6.5kt@071° | Current: 🌊0.2kt@035° | Enhancement: good
+09:00 PM | 💨 LIGHT | Wind: 🌐11.0kt@041° | Current: 🌊0.1kt@160° | Enhancement: good
+
+📅 Day 5: Friday, August 08, 2025
+------------------------------------------------------------
+12:00 AM | 💨 LIGHT | Wind: 🌐10.8kt@037° | Current: 🌊0.3kt@217° | Enhancement: good
+03:00 AM | ⭐ EXCELLENT | Wind: 🌐18.1kt@085° | Current: 🌊0.4kt@318° | Enhancement: moderate
+06:00 AM | ✅ GOOD | Wind: 🌐17.1kt@083° | Current: 🌊0.4kt@325° | Enhancement: moderate
+09:00 AM | ✅ GOOD | Wind: 🌐16.4kt@081° | Current: 🌊0.4kt@321° | Enhancement: good
+12:00 PM | 🌀 MODERATE | Wind: 🌐14.8kt@086° | Current: 🌊0.1kt@342° | Enhancement: moderate
+03:00 PM | ✅ GOOD | Wind: 🌐15.3kt@081° | Current: 🌊0.1kt@016° | Enhancement: good
+06:00 PM | ⭐ EXCELLENT | Wind: 🌐18.1kt@083° | Current: 🌊0.2kt@018° | Enhancement: good
+09:00 PM | ⭐ EXCELLENT | Wind: 🌐20.2kt@079° | Current: 🌊0.3kt@156° | Enhancement: maximum
+
+📅 Day 6: Saturday, August 09, 2025
+------------------------------------------------------------
+12:00 AM | 🔥 PRIME | Wind: 🌐22.7kt@072° | Current: 🌊0.2kt@161° | Enhancement: good
+03:00 AM | 🔥 PRIME | Wind: 🌐23.3kt@077° | Current: 🌊0.2kt@202° | Enhancement: moderate
+06:00 AM | ⭐ EXCELLENT | Wind: 🌐19.5kt@086° | Current: 🌊0.2kt@321° | Enhancement: moderate
+09:00 AM | ✅ GOOD | Wind: 🌐15.8kt@091° | Current: 🌊0.3kt@318° | Enhancement: good
+12:00 PM | 💨 LIGHT | Wind: 🌐11.9kt@087° | Current: 🌊0.2kt@322° | Enhancement: moderate
+03:00 PM | 💨 LIGHT | Wind: 🌐9.7kt@086° | Current: 🌊0.1kt@334° | Enhancement: moderate
+06:00 PM | 🌀 MODERATE | Wind: 🌐12.4kt@073° | Current: 🌊0.1kt@339° | Enhancement: moderate
+09:00 PM | ✅ GOOD | Wind: 🌐17.6kt@062° | Current: 🌊0.1kt@346° | Enhancement: maximum
+
+📅 Day 7: Sunday, August 10, 2025
+------------------------------------------------------------
+12:00 AM | ⭐ EXCELLENT | Wind: 🌐21.1kt@063° | Current: 🌊0.1kt@193° | Enhancement: good
+
+================================================================================
+📊 SUMMARY STATISTICS
+================================================================================
+Total optimal periods found: 46
+✅ Good conditions: 11
+⭐ Excellent conditions: 11
+🔥 Prime conditions: 8
+🌀 Moderate conditions: 8
+💨 Light conditions: 5
+😐 Marginal conditions: 3
+
+🎯 TOP RECOMMENDATIONS:
+   1. Mon 08/04 at 12:00 AM - 25.9kt winds, 0.3kt eastward current
+   2. Mon 08/04 at 03:00 AM - 26.1kt winds, 0.5kt eastward current
+   3. Mon 08/04 at 06:00 AM - 22.3kt winds, 0.4kt eastward current
+
+🏆 PEAK CONDITION:
+    Monday, August 04 at 03:00 AM
+    Wind: 26.1kt @ 66°
+    Current: 0.5kt @ 308°
+    🔥 PRIME conditions - expert level - Maximum wave enhancement
+
+================================================================================
+Analysis complete - Data shows eastward tidal current periods
+================================================================================
