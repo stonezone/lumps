@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUMPS 🌊 North Shore Surf Forecast</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3/dist/cdn.min.js" defer></script>
+    <script src="https://unpkg.com/chart.js@4/dist/chart.umd.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&family=Permanent+Marker&display=swap" rel="stylesheet">
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#00ffff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                        marker: ['Permanent Marker', 'cursive']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #0a192f 0%, #172a45 100%);
+            min-height: 100vh;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .glow-excellent { box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); }
+        .glow-good { box-shadow: 0 0 20px rgba(0, 255, 136, 0.5); }
+        .glow-moderate { box-shadow: 0 0 20px rgba(255, 204, 0, 0.5); }
+        .text-excellent { color: #00ffff; }
+        .text-good { color: #00ff88; }
+        .text-moderate { color: #ffcc00; }
+        .text-poor { color: #64748b; }
+    </style>
+</head>
+<body class="font-sans text-white">
+    <div id="app" x-data="lumpsApp()" x-init="loadData()">
+        <!-- Header -->
+        <header class="p-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <h1 class="text-2xl font-bold">LUMPS 🌊</h1>
+                <span class="text-gray-300">North Shore</span>
+            </div>
+            <button class="glass rounded-lg p-2 text-sm">Settings</button>
+        </header>
+
+        <!-- Loading State -->
+        <div x-show="loading" class="flex items-center justify-center h-64">
+            <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-400"></div>
+        </div>
+
+        <!-- Error State -->
+        <div x-show="error" class="mx-4 p-4 bg-red-500/20 border border-red-500 rounded-lg">
+            <p class="text-red-400">Failed to load surf data. <button @click="loadData()" class="underline">Retry</button></p>
+        </div>
+
+        <!-- Main Content -->
+        <div x-show="!loading && !error" class="space-y-6 p-4">
+            <!-- Current Conditions Card -->
+            <div class="glass rounded-2xl p-6 text-center" :class="currentGlowClass">
+                <div class="mb-4">
+                    <div class="text-6xl font-mono font-bold mb-2" x-text="currentScore + '/10'"></div>
+                    <div class="text-2xl font-marker" :class="currentTextClass" x-text="currentQuality"></div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div class="flex items-center justify-center space-x-2">
+                        <span x-text="trustEmoji[data.current?.wind?.source] || '🌐'"></span>
+                        <span>Wind: <span class="font-mono" x-text="data.current?.wind?.speed + 'kt ' + formatDirection(data.current?.wind?.direction)"></span></span>
+                    </div>
+                    <div class="flex items-center justify-center space-x-2">
+                        <span x-text="trustEmoji[data.current?.current?.source] || '🌊'"></span>
+                        <span>Current: <span class="font-mono" x-text="data.current?.current?.speed?.toFixed(1) + 'kt ' + formatDirection(data.current?.current?.direction)"></span></span>
+                    </div>
+                    <div class="flex items-center justify-center space-x-2">
+                        <span>⚡</span>
+                        <span>Enhancement: <span class="font-mono" x-text="(data.current?.enhancement || '').toUpperCase()"></span></span>
+                    </div>
+                </div>
+                
+                <div class="mt-4 text-xs text-gray-400">
+                    Updated: <span x-text="formatTime(data.generated)"></span>
+                </div>
+            </div>
+
+            <!-- Today's Timeline -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="text-xl font-bold mb-4">Today's Timeline</h3>
+                <div class="h-64">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 7-Day Outlook -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="text-xl font-bold mb-4">7-Day Outlook</h3>
+                <div class="grid grid-cols-7 gap-2">
+                    <template x-for="day in forecast" :key="day.date">
+                        <div class="text-center p-3 rounded-lg" :class="getDayClass(day.quality)">
+                            <div class="text-xs text-gray-300" x-text="formatDayName(day.date)"></div>
+                            <div class="text-2xl my-2" x-text="getQualityEmoji(day.quality)"></div>
+                            <div class="text-xs font-mono" x-text="day.score + '/10'"></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => console.log('SW registered'))
+                    .catch(registrationError => console.log('SW registration failed'));
+            });
+        }
+
+        function lumpsApp() {
+            return {
+                loading: true,
+                error: false,
+                data: {},
+                forecast: [],
+                chart: null,
+                
+                trustEmoji: {
+                    'NDBC_Buoy': '📡',
+                    'OpenMeteo_Forecast': '🌐', 
+                    'PacIOOS_ROMS_Hawaii': '🌊',
+                    'Simulation': '⚠️'
+                },
+
+                async loadData() {
+                    this.loading = true;
+                    this.error = false;
+                    
+                    try {
+                        const response = await fetch('./data/current.json');
+                        if (!response.ok) throw new Error('Failed to fetch');
+                        
+                        this.data = await response.json();
+                        this.generateForecast();
+                        this.updateChart();
+                        this.loading = false;
+                    } catch (err) {
+                        console.error('Error loading data:', err);
+                        this.error = true;
+                        this.loading = false;
+                    }
+                },
+
+                generateForecast() {
+                    // Generate 7-day forecast from timeline data
+                    const days = {};
+                    
+                    (this.data.timeline || []).forEach(item => {
+                        const date = item.datetime.split(' ')[0];
+                        if (!days[date]) {
+                            days[date] = { scores: [], date: date };
+                        }
+                        days[date].scores.push(this.calculateScore(item));
+                    });
+
+                    this.forecast = Object.values(days).slice(0, 7).map(day => {
+                        const avgScore = day.scores.reduce((a, b) => a + b, 0) / day.scores.length;
+                        return {
+                            date: day.date,
+                            score: Math.round(avgScore * 10) / 10,
+                            quality: this.getQualityFromScore(avgScore)
+                        };
+                    });
+                },
+
+                calculateScore(data) {
+                    let score = 5;
+                    
+                    // Wind contribution
+                    if (data.wind_speed >= 18) score += 3;
+                    else if (data.wind_speed >= 15) score += 2;
+                    else if (data.wind_speed >= 12) score += 1;
+                    
+                    // Current contribution
+                    if (data.current_speed >= 0.3 && this.isOpposing(data)) score += 2;
+                    else if (data.current_speed >= 0.2) score += 1;
+                    
+                    return Math.min(score, 10);
+                },
+
+                isOpposing(data) {
+                    const angleDiff = Math.abs(data.wind_dir - data.current_dir);
+                    return angleDiff > 90 && angleDiff < 270;
+                },
+
+                getQualityFromScore(score) {
+                    if (score >= 8) return 'EXCELLENT';
+                    if (score >= 6.5) return 'GOOD';
+                    if (score >= 5) return 'MODERATE';
+                    return 'POOR';
+                },
+
+                get currentScore() {
+                    return this.data.current ? this.calculateScore(this.data.current) : 0;
+                },
+
+                get currentQuality() {
+                    return this.getQualityFromScore(this.currentScore);
+                },
+
+                get currentGlowClass() {
+                    const quality = this.currentQuality.toLowerCase();
+                    if (quality === 'excellent') return 'glow-excellent';
+                    if (quality === 'good') return 'glow-good';
+                    if (quality === 'moderate') return 'glow-moderate';
+                    return '';
+                },
+
+                get currentTextClass() {
+                    const quality = this.currentQuality.toLowerCase();
+                    if (quality === 'excellent') return 'text-excellent';
+                    if (quality === 'good') return 'text-good';
+                    if (quality === 'moderate') return 'text-moderate';
+                    return 'text-poor';
+                },
+
+                getDayClass(quality) {
+                    const q = quality.toLowerCase();
+                    if (q === 'excellent') return 'bg-cyan-500/20 border border-cyan-500';
+                    if (q === 'good') return 'bg-green-500/20 border border-green-500';
+                    if (q === 'moderate') return 'bg-yellow-500/20 border border-yellow-500';
+                    return 'bg-gray-500/20 border border-gray-500';
+                },
+
+                getQualityEmoji(quality) {
+                    const q = quality.toLowerCase();
+                    if (q === 'excellent') return '⭐';
+                    if (q === 'good') return '✅';
+                    if (q === 'moderate') return '📝';
+                    return '😐';
+                },
+
+                formatDirection(degrees) {
+                    if (degrees === undefined) return '';
+                    const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+                    return directions[Math.round(degrees / 22.5) % 16];
+                },
+
+                formatTime(isoString) {
+                    if (!isoString) return '';
+                    return new Date(isoString).toLocaleTimeString('en-US', { 
+                        hour: 'numeric', 
+                        minute: '2-digit',
+                        timeZone: 'Pacific/Honolulu'
+                    });
+                },
+
+                formatDayName(dateString) {
+                    if (!dateString) return '';
+                    return new Date(dateString).toLocaleDateString('en-US', { weekday: 'short' });
+                },
+
+                updateChart() {
+                    const ctx = document.getElementById('timelineChart');
+                    if (!ctx || !this.data.timeline) return;
+
+                    const today = new Date().toISOString().split('T')[0];
+                    const todayData = this.data.timeline.filter(item => 
+                        item.datetime.startsWith(today)
+                    );
+
+                    if (this.chart) {
+                        this.chart.destroy();
+                    }
+
+                    this.chart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: todayData.map(item => {
+                                const hour = new Date(item.datetime).getHours();
+                                return hour + ':00';
+                            }),
+                            datasets: [{
+                                label: 'Conditions Score',
+                                data: todayData.map(item => this.calculateScore(item)),
+                                borderColor: '#00ffff',
+                                backgroundColor: 'rgba(0, 255, 255, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    max: 10,
+                                    ticks: {
+                                        color: '#9ca3af'
+                                    },
+                                    grid: {
+                                        color: 'rgba(156, 163, 175, 0.2)'
+                                    }
+                                },
+                                x: {
+                                    ticks: {
+                                        color: '#9ca3af'
+                                    },
+                                    grid: {
+                                        color: 'rgba(156, 163, 175, 0.2)'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+</html>

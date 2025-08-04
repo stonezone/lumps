@@ -1,0 +1,120 @@
+{
+  "generated": "2025-08-04T13:36:11.357363",
+  "current": {
+    "score": 8,
+    "quality": "EXCELLENT",
+    "wind": {
+      "speed": 17.0,
+      "direction": 86.0,
+      "source": "OpenMeteo_Forecast"
+    },
+    "current": {
+      "speed": 0.22445578284342732,
+      "direction": 322.00671225490373,
+      "source": "PacIOOS_ROMS_Hawaii"
+    },
+    "enhancement": "moderate"
+  },
+  "timeline": [
+    {
+      "datetime": "2025-08-04 15:00:00",
+      "current_speed": 0.22445578284342732,
+      "current_dir": 322.00671225490373,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 17.0,
+      "wind_dir": 86.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "moderate"
+    },
+    {
+      "datetime": "2025-08-04 18:00:00",
+      "current_speed": 0.06810437209010191,
+      "current_dir": 2.891801764630003,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 17.7,
+      "wind_dir": 88.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "maximum"
+    },
+    {
+      "datetime": "2025-08-05 06:00:00",
+      "current_speed": 0.11931186907085191,
+      "current_dir": 227.16701746128237,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 19.9,
+      "wind_dir": 68.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "maximum"
+    },
+    {
+      "datetime": "2025-08-05 09:00:00",
+      "current_speed": 0.1564753238467535,
+      "current_dir": 244.28758390545147,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 18.1,
+      "wind_dir": 69.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "good"
+    },
+    {
+      "datetime": "2025-08-05 12:00:00",
+      "current_speed": 0.3204389450991232,
+      "current_dir": 301.7371009989577,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 15.5,
+      "wind_dir": 68.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "moderate"
+    },
+    {
+      "datetime": "2025-08-05 15:00:00",
+      "current_speed": 0.40086190165828484,
+      "current_dir": 317.2658658123897,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 13.8,
+      "wind_dir": 70.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "moderate"
+    },
+    {
+      "datetime": "2025-08-05 18:00:00",
+      "current_speed": 0.3482870282422064,
+      "current_dir": 323.0841999895929,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 15.9,
+      "wind_dir": 77.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "good"
+    },
+    {
+      "datetime": "2025-08-06 06:00:00",
+      "current_speed": 0.07318020380997343,
+      "current_dir": 349.2611193543614,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 17.3,
+      "wind_dir": 54.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "maximum"
+    },
+    {
+      "datetime": "2025-08-06 09:00:00",
+      "current_speed": 0.11223960290240065,
+      "current_dir": 151.1472337903487,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 18.7,
+      "wind_dir": 62.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "maximum"
+    },
+    {
+      "datetime": "2025-08-06 12:00:00",
+      "current_speed": 0.08223501020034983,
+      "current_dir": 157.58142341115757,
+      "current_source": "PacIOOS_ROMS_Hawaii",
+      "wind_speed": 13.0,
+      "wind_dir": 62.0,
+      "wind_source": "OpenMeteo_Forecast",
+      "enhancement": "moderate"
+    }
+  ]
+}
