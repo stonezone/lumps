@@ -2779,3 +2779,51 @@
 2025-08-04 10:15:41,955 - data_sources - INFO - SUCCESS: Found 43 optimal conditions for eastward current into ENE trades
 2025-08-04 10:15:41,955 - __main__ - INFO - 📊 Analyzing optimal condition periods...
 2025-08-04 10:15:41,962 - __main__ - INFO - Data saved to data/optimal_conditions_20250804.csv
+2025-08-04 13:23:38,874 - __main__ - INFO - Analysis period: 2025-08-04 to 2025-08-11
+2025-08-04 13:23:38,874 - __main__ - INFO - Time window: 06:00 - 19:00 HST
+2025-08-04 13:23:38,874 - __main__ - INFO - Target: Eastward current (030-150°) flowing INTO ENE trades (050-070°)
+2025-08-04 13:23:39,700 - data_sources - INFO - Data source 'pacioos_enhanced' is available
+2025-08-04 13:23:39,700 - data_sources - INFO - Data source 'pacioos' is available
+2025-08-04 13:23:40,498 - data_sources - INFO - Data source 'noaa' is available
+2025-08-04 13:23:40,927 - data_sources - INFO - Data source 'ndbc' is available
+2025-08-04 13:23:41,947 - data_sources - INFO - Data source 'openmeteo' is available
+2025-08-04 13:23:42,245 - data_sources - INFO - Data source 'noaa_weather' is available
+2025-08-04 13:23:42,245 - __main__ - INFO - Using data sources: pacioos_enhanced, pacioos, noaa, ndbc, openmeteo, noaa_weather
+2025-08-04 13:23:42,245 - __main__ - INFO - 🔍 Searching for eastward current flow periods...
+2025-08-04 13:23:42,245 - data_sources - INFO - Collecting data from pacioos_enhanced
+2025-08-04 13:23:42,245 - data_sources - INFO - Starting enhanced PacIOOS current data fetch
+2025-08-04 13:23:42,320 - data_sources - INFO - Adjusting enhanced PacIOOS end date from 2025-08-11 to 2025-08-10 (dataset boundary limit)
+2025-08-04 13:23:58,652 - data_sources - INFO - Combining 6 U chunks and 6 V chunks
+2025-08-04 13:23:58,659 - data_sources - INFO - Merged data points: 1200
+2025-08-04 13:23:58,674 - data_sources - INFO - Enhanced processing complete: 45 aggregated timestamps
+2025-08-04 13:23:58,674 - data_sources - INFO - Enhanced PacIOOS fetch successful: 45 final records
+2025-08-04 13:23:58,674 - data_sources - INFO - Collected 45 records from pacioos_enhanced
+2025-08-04 13:23:58,675 - data_sources - INFO - Collecting data from pacioos
+2025-08-04 13:23:59,157 - data_sources - INFO - Adjusting PacIOOS end date from 2025-08-11 to 2025-08-10 (dataset boundary limit)
+2025-08-04 13:23:59,158 - data_sources - INFO - Fetching PacIOOS u-component: https://pae-paha.pacioos.hawaii.edu/erddap/griddap/roms_hiig.csv?u[(2025-08-04T13:23:38Z):(2025-08-10T00:00:00Z)][0][(21.6):(21.7)][(-158.2):(-157.9)]
+2025-08-04 13:23:59,333 - data_sources - INFO - Fetching PacIOOS v-component: https://pae-paha.pacioos.hawaii.edu/erddap/griddap/roms_hiig.csv?v[(2025-08-04T13:23:38Z):(2025-08-10T00:00:00Z)][0][(21.6):(21.7)][(-158.2):(-157.9)]
+2025-08-04 13:23:59,489 - data_sources - INFO - Successfully fetched PacIOOS ERDDAP data - parsing components
+2025-08-04 13:23:59,792 - data_sources - INFO - Successfully parsed 1215 current records from PacIOOS ROMS (before spatial aggregation)
+2025-08-04 13:23:59,805 - data_sources - INFO - Aggregated to 45 unique timestamps from PacIOOS ROMS
+2025-08-04 13:23:59,805 - data_sources - INFO - Collected 45 records from pacioos
+2025-08-04 13:23:59,805 - data_sources - INFO - Collecting data from noaa
+2025-08-04 13:24:00,247 - data_sources - WARNING - HTTP 500 error, retrying in 1s (attempt 1/3)
+2025-08-04 13:24:01,681 - data_sources - WARNING - HTTP 500 error, retrying in 2s (attempt 2/3)
+2025-08-04 13:24:04,124 - data_sources - ERROR - NOAA API request failed after retries: All 3 attempts failed
+2025-08-04 13:24:04,124 - data_sources - WARNING - No data returned from noaa
+2025-08-04 13:24:04,124 - data_sources - INFO - Collecting data from ndbc
+2025-08-04 13:24:04,337 - data_sources - INFO - Collected 20 records from ndbc
+2025-08-04 13:24:04,337 - data_sources - INFO - Collecting data from openmeteo
+2025-08-04 13:24:04,337 - data_sources - INFO - Fetching Open-Meteo wind data for 21.67, -158.12
+2025-08-04 13:24:05,282 - data_sources - INFO - Successfully fetched 154 wind records from Open-Meteo
+2025-08-04 13:24:05,282 - data_sources - INFO - Collected 154 records from openmeteo
+2025-08-04 13:24:05,282 - data_sources - INFO - Collecting data from noaa_weather
+2025-08-04 13:24:05,487 - data_sources - WARNING - No data returned from noaa_weather
+2025-08-04 13:24:05,488 - data_sources - INFO - Using PacIOOS ROMS model forecast for current data (highest quality)
+2025-08-04 13:24:05,488 - data_sources - INFO - Available wind sources: ['ndbc(observed)', 'openmeteo(forecast)']
+2025-08-04 13:24:05,491 - data_sources - INFO - Found 42 periods of current flow >= 0.05 kt
+2025-08-04 13:24:05,491 - data_sources - INFO - Flow types: {'northward': 20, 'southward': 13, 'westward': 9}
+2025-08-04 13:24:05,491 - data_sources - INFO - Interaction potential: {'cross_flow': 32, 'moderate_following': 9, 'high_opposing': 1}
+2025-08-04 13:24:05,504 - data_sources - INFO - SUCCESS: Found 42 optimal conditions for eastward current into ENE trades
+2025-08-04 13:24:05,504 - __main__ - INFO - 📊 Analyzing optimal condition periods...
+2025-08-04 13:24:05,512 - __main__ - INFO - Data saved to data/optimal_conditions_20250804.csv
