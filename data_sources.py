@@ -4,12 +4,14 @@ Modular data source interfaces for North Shore current and wind data
 Focuses on finding eastward current flow (Sunset Beach → Turtle Bay) into ENE trades
 """
 
+import re
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import logging
 import time
+import pytz
 from typing import Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -161,22 +163,10 @@ class NOAACurrentSource(DataSource):
     
     def is_available(self) -> bool:
         """Check if NOAA current predictions API is responding"""
-        try:
-            # Test with a 1-day query
-            test_params = {
-                'id': self.station_id,
-                'start_date': datetime.now().strftime('%Y-%m-%d'),
-                'range': '1',
-                'date_timeUnits': 'am/pm',
-                'interval': 'MAX_SLACK',
-                'time_zone': 'LST_LDT',
-                'units': '1',
-                'format': 'txt'
-            }
-            response = requests.get(self.base_url, params=test_params, timeout=10)
-            return response.status_code == 200 and 'Kahuku Point' in response.text
-        except:
-            return False
+        # NOAA current predictions API is currently failing with HTTP 500 errors
+        # Disabling this source to prevent log spam until API is fixed
+        logger.debug("NOAA current predictions API disabled due to persistent HTTP 500 errors")
+        return False
 
 class PacIOOSCurrentSource(DataSource):
     """PacIOOS current forecasts and observations"""
@@ -929,6 +919,409 @@ class OpenMeteoWindSource(DataSource):
         except:
             return False
 
+
+class NOAACWFWindSource(DataSource):
+    """
+    NOAA Coastal Waters Forecast - Marine wind forecast for Hawaiian waters
+    Provides 5-day detailed wind forecasts for Oahu Leeward Waters
+    """
+    
+    def __init__(self):
+        self.base_url = "https://forecast.weather.gov/product.php"
+        self.timezone = pytz.timezone('Pacific/Honolulu')
+        
+    def fetch_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Fetch and parse NOAA Coastal Waters Forecast"""
+        try:
+            # Fetch the forecast text
+            params = {
+                'issuedby': 'HFO',
+                'product': 'CWF',
+                'site': 'hfo'
+            }
+            
+            response = requests.get(self.base_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the HTML to extract the forecast text
+            forecast_text = self._extract_forecast_text(response.text)
+            
+            if not forecast_text:
+                logger.warning("No forecast text found in NOAA CWF response")
+                return pd.DataFrame()
+            
+            # Parse Oahu Leeward Waters section
+            leeward_forecast = self._extract_leeward_forecast(forecast_text)
+            
+            if not leeward_forecast:
+                logger.warning("No Oahu Leeward Waters forecast found")
+                return pd.DataFrame()
+            
+            # Convert forecast to dataframe
+            forecast_data = self._parse_forecast_to_dataframe(leeward_forecast, start_date)
+            
+            # Filter to requested date range
+            if not forecast_data.empty:
+                forecast_data = forecast_data[
+                    (forecast_data['datetime'] >= start_date) & 
+                    (forecast_data['datetime'] <= end_date)
+                ]
+            
+            logger.info(f"Fetched {len(forecast_data)} wind forecasts from NOAA CWF")
+            return forecast_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching NOAA CWF data: {e}")
+            return pd.DataFrame()
+    
+    def _extract_forecast_text(self, html_content: str) -> str:
+        """Extract the forecast text from HTML"""
+        try:
+            # Look for the pre-formatted text section
+            pre_match = re.search(r'<pre[^>]*>(.*?)</pre>', html_content, re.DOTALL)
+            if pre_match:
+                return pre_match.group(1)
+            return ""
+        except Exception as e:
+            logger.error(f"Error extracting forecast text: {e}")
+            return ""
+    
+    def _extract_leeward_forecast(self, forecast_text: str) -> str:
+        """Extract Oahu Leeward Waters section"""
+        try:
+            # Find the Oahu Leeward Waters section
+            start_marker = "Oahu Leeward Waters-"
+            end_markers = ["$$", "Kauai Channel-", "Oahu Windward Waters-", "Kaiwi Channel-"]
+            
+            start_idx = forecast_text.find(start_marker)
+            if start_idx == -1:
+                return ""
+            
+            # Find the end of this section
+            end_idx = len(forecast_text)
+            for marker in end_markers:
+                idx = forecast_text.find(marker, start_idx)
+                if idx > start_idx:
+                    end_idx = min(end_idx, idx)
+            
+            return forecast_text[start_idx:end_idx]
+            
+        except Exception as e:
+            logger.error(f"Error extracting leeward forecast: {e}")
+            return ""
+    
+    def _parse_forecast_to_dataframe(self, forecast_text: str, base_date: datetime) -> pd.DataFrame:
+        """Parse forecast text into structured dataframe"""
+        try:
+            
+            # Extract issue time
+            time_match = re.search(r'(\d{1,2})\s*([AP]M)\s+HST', forecast_text)
+            
+            # Define period patterns
+            period_patterns = [
+                (r'\.TONIGHT\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'tonight'),
+                (r'\.TUESDAY\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'tuesday'),
+                (r'\.TUESDAY NIGHT\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'tuesday_night'),
+                (r'\.WEDNESDAY\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'wednesday'),
+                (r'\.WEDNESDAY NIGHT\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'wednesday_night'),
+                (r'\.THURSDAY\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'thursday'),
+                (r'\.THURSDAY NIGHT\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'thursday_night'),
+                (r'\.FRIDAY\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'friday'),
+                (r'\.SATURDAY\.\.\.(.+?)(?=\.\w+\.\.\.|\Z)', 'saturday'),
+            ]
+            
+            forecast_data = []
+            
+            for pattern, period_name in period_patterns:
+                match = re.search(pattern, forecast_text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    period_text = match.group(1).strip()
+                    
+                    # Check if there's a "becoming" pattern for afternoon winds
+                    has_becoming = 'becoming' in period_text.lower() and 'afternoon' in period_text.lower()
+                    
+                    # Parse wind information
+                    wind_info = self._parse_wind_info(period_text)
+                    
+                    if wind_info:
+                        # Calculate datetime for this period
+                        period_dt = self._get_period_datetime(period_name, base_date)
+                        
+                        # Add multiple time points for each period
+                        if 'night' in period_name.lower():
+                            hours = [18, 21, 0, 3]  # Evening through early morning
+                        else:
+                            hours = [6, 9, 12, 15]  # Morning through afternoon
+                        
+                        for hour in hours:
+                            dt = period_dt.replace(hour=hour % 24)
+                            if hour >= 24:
+                                dt += timedelta(days=1)
+                            
+                            # For periods with "becoming...in the afternoon", 
+                            # use different winds for morning vs afternoon
+                            if has_becoming and hour < 12:
+                                # Morning: use the first part (variable winds)
+                                # Re-parse to get just the morning part
+                                morning_text = period_text.split('becoming')[0]
+                                morning_wind = self._parse_wind_info_simple(morning_text)
+                                if morning_wind:
+                                    forecast_data.append({
+                                        'datetime': dt,
+                                        'wind_speed': morning_wind['speed'],
+                                        'wind_dir': morning_wind['direction'],
+                                        'wind_speed_min': morning_wind['speed_min'],
+                                        'wind_speed_max': morning_wind['speed_max'],
+                                        'source': 'NOAA_CWF',
+                                        'quality': 'official_forecast',
+                                        'period': period_name
+                                    })
+                            else:
+                                # Afternoon or no "becoming": use the main wind info
+                                forecast_data.append({
+                                    'datetime': dt,
+                                    'wind_speed': wind_info['speed'],
+                                    'wind_dir': wind_info['direction'],
+                                    'wind_speed_min': wind_info['speed_min'],
+                                    'wind_speed_max': wind_info['speed_max'],
+                                    'source': 'NOAA_CWF',
+                                    'quality': 'official_forecast',
+                                    'period': period_name
+                                })
+            
+            return pd.DataFrame(forecast_data)
+            
+        except Exception as e:
+            logger.error(f"Error parsing forecast to dataframe: {e}")
+            return pd.DataFrame()
+    
+    def _parse_wind_info(self, text: str) -> Dict:
+        """Parse wind direction and speed from forecast text"""
+        try:
+            # Check for "becoming" pattern to get afternoon winds
+            becoming_match = re.search(
+                r'becoming\s+(north northwest|northwest|north|northeast|east northeast|east|southeast|south|southwest|west|variable)\s+(\d+)(?:\s+to\s+(\d+))?\s+knots?',
+                text, re.IGNORECASE
+            )
+            
+            # Common wind patterns - FIXED to handle actual NOAA format
+            patterns = [
+                # Pattern for "Winds variable less than X knots" (must come first)
+                r'Winds?\s+variable\s+less\s+than\s+(\d+)\s+knots?',
+                # Pattern for directional winds with range
+                r'(East northeast|Northeast|East southeast|East|Southeast|North northwest|Northwest|North|South|West|Variable)\s+winds?\s+(?:around\s+)?(\d+)\s+to\s+(\d+)\s+knots?',
+                # Pattern for directional winds with single speed
+                r'(East northeast|Northeast|East southeast|East|Southeast|North northwest|Northwest|North|South|West|Variable)\s+winds?\s+(?:around\s+)?(\d+)\s+knots?',
+            ]
+            
+            # Parse the main wind pattern
+            main_wind = None
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    groups = match.groups()
+                    
+                    # Handle "variable less than" pattern
+                    if 'variable less than' in text.lower():
+                        speed_max = int(groups[0])
+                        speed_min = 3  # Assume minimum of 3 knots for "variable less than"
+                        speed_avg = (speed_min + speed_max) / 2
+                        direction = 0  # Variable winds have no specific direction
+                        
+                        main_wind = {
+                            'direction': direction,
+                            'speed': speed_avg,
+                            'speed_min': speed_min,
+                            'speed_max': speed_max
+                        }
+                        break
+                    
+                    # Parse direction for other patterns
+                    direction_text = groups[0].lower()
+                    direction = self._text_to_degrees(direction_text)
+                    
+                    # Parse speed
+                    if len(groups) == 3:
+                        speed_min = int(groups[1])
+                        speed_max = int(groups[2])
+                    elif len(groups) == 2:
+                        speed_min = speed_max = int(groups[1])
+                    else:
+                        continue
+                    
+                    speed_avg = (speed_min + speed_max) / 2
+                    
+                    main_wind = {
+                        'direction': direction,
+                        'speed': speed_avg,
+                        'speed_min': speed_min,
+                        'speed_max': speed_max
+                    }
+                    break
+            
+            # If there's a "becoming" pattern, use that for afternoon
+            # Otherwise return the main wind pattern
+            if becoming_match and 'afternoon' in text.lower():
+                groups = becoming_match.groups()
+                direction_text = groups[0].lower()
+                direction = self._text_to_degrees(direction_text)
+                
+                if groups[2]:  # Range: X to Y knots
+                    speed_min = int(groups[1])
+                    speed_max = int(groups[2])
+                else:  # Single speed: X knots
+                    speed_min = speed_max = int(groups[1])
+                
+                speed_avg = (speed_min + speed_max) / 2
+                
+                # For now, return the afternoon wind as primary
+                # In the future, we might want to return both
+                return {
+                    'direction': direction,
+                    'speed': speed_avg,
+                    'speed_min': speed_min,
+                    'speed_max': speed_max,
+                    'has_morning_variant': main_wind is not None
+                }
+            
+            if main_wind:
+                return main_wind
+            
+            # If no pattern matched, log what we couldn't parse
+            logger.debug(f"Could not parse wind info from: {text[:100]}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing wind info: {e}")
+            return None
+
+    def _parse_wind_info_simple(self, text: str) -> Dict:
+        """Simple wind parser for morning/first part of forecast"""
+        try:
+            # Pattern for "Winds variable less than X knots"
+            match = re.search(r'Winds?\s+variable\s+less\s+than\s+(\d+)\s+knots?', text, re.IGNORECASE)
+            if match:
+                speed_max = int(match.group(1))
+                return {
+                    'direction': 0,  # Variable
+                    'speed': (3 + speed_max) / 2,  # Average
+                    'speed_min': 3,
+                    'speed_max': speed_max
+                }
+            
+            # Pattern for regular winds
+            match = re.search(
+                r'([\w\s]+?)\s+winds?\s+(\d+)(?:\s+to\s+(\d+))?\s+knots?',
+                text, re.IGNORECASE
+            )
+            if match:
+                direction_text = match.group(1).strip().lower()
+                direction = self._text_to_degrees(direction_text)
+                
+                if match.group(3):  # Range
+                    speed_min = int(match.group(2))
+                    speed_max = int(match.group(3))
+                else:  # Single speed
+                    speed_min = speed_max = int(match.group(2))
+                
+                return {
+                    'direction': direction,
+                    'speed': (speed_min + speed_max) / 2,
+                    'speed_min': speed_min,
+                    'speed_max': speed_max
+                }
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error in simple wind parsing: {e}")
+            return None
+    
+    def _text_to_degrees(self, direction_text: str) -> int:
+        """Convert text wind direction to degrees"""
+        directions = {
+            'north': 0,
+            'north northeast': 22,
+            'northeast': 45,
+            'east northeast': 67,
+            'east': 90,
+            'east southeast': 112,
+            'southeast': 135,
+            'south southeast': 157,
+            'south': 180,
+            'south southwest': 202,
+            'southwest': 225,
+            'west southwest': 247,
+            'west': 270,
+            'west northwest': 292,
+            'northwest': 315,
+            'north northwest': 337,
+            'variable': 0  # Default for variable winds
+        }
+        
+        return directions.get(direction_text.lower(), 0)
+    
+    def _get_period_datetime(self, period_name: str, base_date: datetime) -> datetime:
+        """Convert period name to datetime
+        
+        This function needs to be dynamic based on what day the forecast was issued.
+        We need to figure out what day 'today' is from the base_date.
+        """
+        # Get the day of week for base_date (0=Monday, 6=Sunday)
+        base_day = base_date.weekday()
+        
+        # Map day names to day of week numbers
+        day_numbers = {
+            'monday': 0,
+            'tuesday': 1,
+            'wednesday': 2,
+            'thursday': 3,
+            'friday': 4,
+            'saturday': 5,
+            'sunday': 6
+        }
+        
+        # Handle special cases
+        if period_name.lower() == 'tonight':
+            return base_date  # Tonight is still today's date
+        
+        # Extract the day name from the period (e.g., "wednesday" from "wednesday_night")
+        day_name = period_name.lower().replace('_night', '').replace('night', '').strip()
+        
+        if day_name in day_numbers:
+            target_day = day_numbers[day_name]
+            days_ahead = (target_day - base_day) % 7
+            
+            # If days_ahead is 0, it means it's the same day of week
+            # Check if we mean today or next week
+            if days_ahead == 0 and period_name.lower() != 'tonight':
+                # If the period name matches today's day, use today
+                # Otherwise it's next week
+                if base_date.strftime('%A').lower() == day_name:
+                    days_ahead = 0
+                else:
+                    days_ahead = 7
+            
+            return base_date + timedelta(days=days_ahead)
+        
+        # Fallback to base_date if we can't parse
+        logger.warning(f"Could not parse period name: {period_name}")
+        return base_date
+    
+    def is_available(self) -> bool:
+        """Check if NOAA CWF is accessible"""
+        try:
+            # HEAD request returns 500 but GET works, so do a lightweight GET
+            params = {
+                'issuedby': 'HFO',
+                'product': 'CWF', 
+                'site': 'hfo'
+            }
+            response = requests.get(self.base_url, params=params, timeout=5)
+            # Check if we got a valid response with forecast content
+            return response.status_code == 200 and 'Oahu Leeward Waters' in response.text
+        except:
+            return False
+
 class TidalCurrentAnalyzer:
     """Analyzes tidal patterns to find eastward current flow periods"""
     
@@ -1050,22 +1443,22 @@ class TidalCurrentAnalyzer:
     def find_eastward_flow_periods(self, current_data: pd.DataFrame) -> pd.DataFrame:
         """
         Find periods of eastward flow that can oppose ENE trade winds
-        Optimal range: ENE to ESE (060-120°) for true eastward opposition
+        Optimal range: NNE to ENE (010-080°) for coast-parallel opposition
         """
         try:
             if current_data.empty:
                 return pd.DataFrame()
             
             # TRUE eastward flow criteria for opposing ENE trades:
-            # - Direction: 060-120° (ENE through ESE - proper eastward flow)
+            # - Direction: 010-080° (NNE through ENE - coast-parallel flow)
             # - This opposes typical ENE trade winds (050-070°)
             # - Speed: >= 0.1 knots (meaningful current for wave enhancement)
             
             # True eastward flow that opposes ENE trade winds (050-070°)
-            # Optimal range: ENE to ESE (060-120°) 
+            # Optimal range: NNE to ENE (010-080°) - parallel to coast, not toward shore
             eastward_mask = (
-                (current_data['current_dir'] >= 60) &    # ENE (060°)
-                (current_data['current_dir'] <= 120) &   # ESE (120°)
+                (current_data['current_dir'] >= 10) &    # NNE (010°)
+                (current_data['current_dir'] <= 80) &    # ENE (080°)
                 (current_data['current_speed'] >= 0.1)   # Meaningful current
             )
             
@@ -1075,8 +1468,8 @@ class TidalCurrentAnalyzer:
                 # Categorize the flow directions within eastward range
                 eastward_periods['flow_category'] = pd.cut(
                     eastward_periods['current_dir'],
-                    bins=[60, 75, 90, 105, 120],
-                    labels=['ENE', 'E-ENE', 'E', 'E-ESE'],
+                    bins=[10, 30, 50, 65, 80],
+                    labels=['NNE', 'NE', 'NE-ENE', 'ENE'],
                     include_lowest=True
                 )
                 
@@ -1090,7 +1483,7 @@ class TidalCurrentAnalyzer:
                 
                 # Log what we found
                 flow_counts = eastward_periods['flow_category'].value_counts()
-                logger.info(f"Found {len(eastward_periods)} eastward flow periods (060-120°)")
+                logger.info(f"Found {len(eastward_periods)} eastward flow periods (010-080°)")
                 logger.info(f"Flow breakdown: {flow_counts.to_dict()}")
                 logger.info(f"Average current speed: {eastward_periods['current_speed'].mean():.2f} kt")
                 
@@ -1101,7 +1494,7 @@ class TidalCurrentAnalyzer:
                 
                 eastward_periods['is_true_eastward'] = True
             else:
-                logger.warning("NO EASTWARD CURRENTS FOUND (060-120°)")
+                logger.warning("NO EASTWARD CURRENTS FOUND (010-080°)")
                 # Debug: show what directions ARE in the data
                 if not current_data.empty:
                     dir_summary = current_data.groupby(pd.cut(current_data['current_dir'], 
@@ -1149,7 +1542,7 @@ class TidalCurrentAnalyzer:
         """
         Analyze current-wind interaction
         ENE winds typically 050-070°
-        Best opposition: currents 030-150° (includes NE through SE)
+        Best opposition: currents 010-080° (NNE through ENE, coast-parallel)
         """
         try:
             # Calculate angle between current and wind
@@ -1158,10 +1551,10 @@ class TidalCurrentAnalyzer:
                 angle_diff = 360 - angle_diff
             
             # Check if this is true eastward flow (ENE to ESE)
-            is_eastward = 60 <= current_dir <= 120  # Proper eastward range
+            is_eastward = 60 <= current_dir <= 120  # True eastward flow range
             
-            # Special handling for NE currents vs ENE winds
-            is_ne_current = 30 <= current_dir <= 60
+            # Special handling for ENE currents vs ENE winds (optimal opposition)
+            is_ne_current = 50 <= current_dir <= 70  # ENE range
             typical_ene_wind = 50 <= wind_dir <= 70
             
             # Calculate tidal enhancement
@@ -1431,6 +1824,382 @@ class NOAAWeatherBuoySource(DataSource):
         except:
             return False
 
+class NOAAMarineSource(DataSource):
+    """NOAA Marine Weather Forecast for wind and wind wave data"""
+    
+    def __init__(self):
+        self.base_url = "https://marine.weather.gov/MapClick.php"
+        # Location: ~14NM NE of Kahuku (North Shore Oahu)
+        self.lat = 21.8298
+        self.lon = -157.759
+        self.max_forecast_days = 6
+        
+    def _generate_url(self, ahead_hours: int = 0) -> str:
+        """Generate NOAA marine forecast URL for specific forecast window"""
+        params = {
+            'w3': 'sfcwind',      # Surface wind
+            'w3u': '1',           # Wind units (mph)
+            'w14': 'wwh',         # Wind wave height
+            'AheadHour': str(ahead_hours),
+            'FcstType': 'digital',
+            'textField1': str(self.lat),
+            'textField2': str(self.lon),
+            'site': 'all',
+            'unit': '0',
+            'dd': '',
+            'bw': '',
+            'marine': '1'
+        }
+        
+        from urllib.parse import urlencode
+        return f"{self.base_url}?{urlencode(params)}"
+    
+    def _parse_forecast_table(self, html_content: str, base_date: datetime) -> List[Dict]:
+        """Parse the HTML forecast table to extract wind and wave data
+        
+        The NOAA Marine forecast table has a unique structure where all data
+        is concatenated together within table cells, not separated.
+        Example: "Date08/0508/06Hour (HST)091011121314..."
+        """
+        from bs4 import BeautifulSoup
+        import re
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
+        data_rows = []
+        
+        # Find all tables
+        tables = soup.find_all('table')
+        
+        # According to investigation, table 4 (index 3) typically contains the forecast data
+        # But we'll also check other tables if needed
+        forecast_table = None
+        table_indices_to_check = [3, 4, 5, 2, 6, 1, 0]  # Priority order based on typical structure
+        
+        for idx in table_indices_to_check:
+            if idx < len(tables):
+                table = tables[idx]
+                text = table.get_text()
+                # Look for the data table that has Hour and Surface Wind
+                if 'Hour (HST)' in text and 'Surface Wind' in text:
+                    forecast_table = table
+                    logger.debug(f"Found forecast table at index {idx}")
+                    break
+        
+        if not forecast_table:
+            logger.warning("Could not find forecast table in HTML")
+            return data_rows
+        
+        # Get the table text and clean it
+        table_text = forecast_table.get_text()
+        # Remove all whitespace to work with concatenated format
+        clean_text = ''.join(table_text.split())
+        
+        # Extract dates using regex
+        dates = []
+        date_pattern = r'Date((?:\d{2}/\d{2})+)'
+        date_match = re.search(date_pattern, clean_text)
+        if date_match:
+            date_string = date_match.group(1)
+            dates = re.findall(r'(\d{2}/\d{2})', date_string)
+            logger.debug(f"Found dates: {dates}")
+        
+        # Extract hours - they appear after "Hour(HST)" as consecutive 2-digit numbers
+        hours = []
+        hour_pattern = r'Hour\(HST\)((?:\d{2})+)'
+        hour_match = re.search(hour_pattern, clean_text)
+        if hour_match:
+            hour_string = hour_match.group(1)
+            # Split into 2-digit chunks
+            hours = [hour_string[i:i+2] for i in range(0, len(hour_string), 2)]
+            logger.debug(f"Found {len(hours)} hours")
+        
+        # Extract wind speeds - they appear after "SurfaceWind(mph)"
+        wind_speeds = []
+        wind_pattern = r'SurfaceWind\(mph\)([\d]+)'
+        wind_match = re.search(wind_pattern, clean_text)
+        if wind_match:
+            wind_string = wind_match.group(1)
+            # Wind speeds can be 1 or 2 digits
+            # We need to parse intelligently based on hour count
+            wind_speeds = self._parse_numeric_sequence(wind_string, len(hours), is_wave_height=False)
+            logger.debug(f"Found {len(wind_speeds)} wind speeds")
+        
+        # Extract wind directions - they appear after "WindDir"
+        wind_dirs = []
+        dir_pattern = r'WindDir([NESW]+)'
+        dir_match = re.search(dir_pattern, clean_text)
+        if dir_match:
+            dir_string = dir_match.group(1)
+            # Parse direction codes (1-3 letters each, e.g., E, NE, ENE, NNE)
+            wind_dirs = self._parse_wind_directions(dir_string, len(hours))
+            logger.debug(f"Found {len(wind_dirs)} wind directions")
+        
+        # Extract wave heights if available
+        wave_heights = []
+        # Try different wave patterns
+        wave_patterns = [
+            r'WindWaveHeight\(ft\)([\d]+)',
+            r'WindWaveHeight([\d]+)',
+            r'WaveHeight\(ft\)([\d]+)',
+            r'WaveHeight([\d]+)',
+            r'WindWave([\d]+)'
+        ]
+        
+        for pattern in wave_patterns:
+            wave_match = re.search(pattern, clean_text)
+            if wave_match:
+                wave_string = wave_match.group(1)
+                wave_heights = self._parse_numeric_sequence(wave_string, len(hours), is_wave_height=True)
+                logger.debug(f"Found {len(wave_heights)} wave heights with pattern {pattern}")
+                break
+        
+        # Build data rows
+        if not hours or not wind_speeds:
+            logger.warning("Missing required data (hours or wind speeds)")
+            return data_rows
+        
+        # Figure out how many hours per date
+        hours_per_date = len(hours) // len(dates) if dates else 24
+        
+        current_date = base_date
+        date_index = 0
+        hours_in_current_date = 0
+        last_hour = -1
+        
+        for i in range(min(len(hours), len(wind_speeds))):
+            try:
+                hour = int(hours[i])
+                
+                # Check for date change based on hour reset or hours per date
+                if hour < last_hour or hours_in_current_date >= hours_per_date:
+                    current_date += timedelta(days=1)
+                    date_index += 1
+                    hours_in_current_date = 0
+                
+                last_hour = hour
+                hours_in_current_date += 1
+                
+                # Parse wind speed (convert mph to knots)
+                wind_speed_mph = float(wind_speeds[i]) if i < len(wind_speeds) else 0
+                wind_speed_kts = wind_speed_mph * 0.868976
+                
+                # Parse wind direction
+                wind_dir_str = wind_dirs[i] if i < len(wind_dirs) else 'E'
+                
+                # Convert wind direction to degrees
+                dir_map = {
+                    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+                    'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+                    'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+                    'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+                }
+                wind_dir_deg = dir_map.get(wind_dir_str.upper(), 90)
+                
+                # Parse wave height
+                wave_height = float(wave_heights[i]) if i < len(wave_heights) else None
+                
+                # Only add data point if we have valid wind data
+                if wind_speed_kts >= 0:
+                    data_point = {
+                        'timestamp': current_date.replace(hour=hour, minute=0, second=0),
+                        'wind_speed_kts': wind_speed_kts,
+                        'wind_dir_deg': wind_dir_deg,
+                        'source': 'NOAA_Marine'
+                    }
+                    
+                    # Only add wave height if we have it
+                    if wave_height is not None:
+                        data_point['wind_wave_height_ft'] = wave_height
+                    
+                    data_rows.append(data_point)
+                
+            except Exception as e:
+                logger.debug(f"Error parsing data at index {i}: {e}")
+                continue
+        
+        logger.info(f"Parsed {len(data_rows)} data points from NOAA Marine forecast")
+        return data_rows
+    
+    def _parse_numeric_sequence(self, number_string: str, expected_count: int, is_wave_height: bool = False) -> List[str]:
+        """Parse a string of concatenated numbers into individual values
+        
+        This handles cases where numbers can be 1 or 2 digits.
+        Strategy: Try different parsing approaches and pick the one that
+        gives us closest to the expected count.
+        
+        Args:
+            number_string: String of concatenated numbers
+            expected_count: Expected number of values
+            is_wave_height: If True, prefer single-digit parsing (wave heights are typically 0-9 ft)
+        """
+        results = []
+        
+        # For wave heights, prefer single digits since they're typically 0-9 ft
+        if is_wave_height:
+            # Strategy for wave heights: prefer single digits
+            single_digit = list(number_string)
+            
+            # Also try two-digit parsing in case waves are 10+ ft
+            two_digit = [number_string[i:i+2] for i in range(0, len(number_string), 2)]
+            
+            # Pick based on which gives us the expected count
+            if len(single_digit) == expected_count:
+                results = single_digit
+            elif len(two_digit) == expected_count:
+                results = two_digit
+            else:
+                # Default to single digits for wave heights
+                results = single_digit
+        else:
+            # Strategy 1: Assume all are 2-digit numbers
+            two_digit = [number_string[i:i+2] for i in range(0, len(number_string), 2)]
+            
+            # Strategy 2: Parse adaptively - look for patterns
+            # If we see numbers > 31, they're likely concatenated single digits
+            adaptive = []
+            i = 0
+            while i < len(number_string):
+                if i + 1 < len(number_string):
+                    two_digit_val = int(number_string[i:i+2])
+                    # Wind speeds typically < 50 mph
+                    if two_digit_val <= 50:
+                        adaptive.append(number_string[i:i+2])
+                        i += 2
+                    else:
+                        # Probably two single digits
+                        adaptive.append(number_string[i])
+                        i += 1
+                else:
+                    adaptive.append(number_string[i])
+                    i += 1
+            
+            # Pick the strategy that gives us closest to expected count
+            if abs(len(two_digit) - expected_count) <= abs(len(adaptive) - expected_count):
+                results = two_digit
+            else:
+                results = adaptive
+        
+        # If we have too many values, truncate; if too few, pad with last value
+        if len(results) > expected_count:
+            results = results[:expected_count]
+        elif len(results) < expected_count and results:
+            last_val = results[-1]
+            while len(results) < expected_count:
+                results.append(last_val)
+        
+        return results
+    
+    def _parse_wind_directions(self, direction_string: str, expected_count: int) -> List[str]:
+        """Parse a string of concatenated wind directions
+        
+        Wind directions can be 1-3 letters (N, NE, ENE, NNE, etc.)
+        This is tricky because they're variable length.
+        """
+        results = []
+        i = 0
+        
+        while i < len(direction_string) and len(results) < expected_count:
+            # Try to match the longest valid direction first
+            matched = False
+            
+            # Try 3-letter directions first (NNE, ENE, ESE, SSE, SSW, WSW, WNW, NNW)
+            if i + 3 <= len(direction_string):
+                three_letter = direction_string[i:i+3]
+                if three_letter in ['NNE', 'ENE', 'ESE', 'SSE', 'SSW', 'WSW', 'WNW', 'NNW']:
+                    results.append(three_letter)
+                    i += 3
+                    matched = True
+            
+            # Try 2-letter directions (NE, SE, SW, NW)
+            if not matched and i + 2 <= len(direction_string):
+                two_letter = direction_string[i:i+2]
+                if two_letter in ['NE', 'SE', 'SW', 'NW']:
+                    results.append(two_letter)
+                    i += 2
+                    matched = True
+            
+            # Try 1-letter directions (N, E, S, W)
+            if not matched and i < len(direction_string):
+                one_letter = direction_string[i]
+                if one_letter in ['N', 'E', 'S', 'W']:
+                    results.append(one_letter)
+                    i += 1
+                    matched = True
+            
+            # If no match, skip this character (shouldn't happen with valid data)
+            if not matched:
+                i += 1
+        
+        # Pad with 'E' if we don't have enough directions
+        while len(results) < expected_count:
+            results.append('E')
+        
+        return results[:expected_count]
+    
+    def fetch_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Fetch NOAA marine forecast data for the specified date range"""
+        from datetime import timedelta
+        import requests
+        
+        all_data = []
+        
+        # Calculate how many days we need
+        total_days = (end_date - start_date).days + 1
+        if total_days > self.max_forecast_days:
+            logger.warning(f"Requested {total_days} days but NOAA marine forecast only provides {self.max_forecast_days} days")
+            total_days = min(total_days, self.max_forecast_days)
+        
+        # Fetch data in ~2-day chunks (48 hours)
+        current_ahead_hours = 0
+        while current_ahead_hours < total_days * 24:
+            try:
+                url = self._generate_url(current_ahead_hours)
+                logger.debug(f"Fetching NOAA marine forecast from: {url}")
+                
+                response = requests.get(url, timeout=30)
+                response.raise_for_status()
+                
+                # Calculate base date for this chunk
+                chunk_base_date = datetime.now() + timedelta(hours=current_ahead_hours)
+                
+                # Parse the HTML response
+                chunk_data = self._parse_forecast_table(response.text, chunk_base_date)
+                all_data.extend(chunk_data)
+                
+                # Move to next 48-hour window
+                current_ahead_hours += 48
+                
+            except Exception as e:
+                logger.error(f"Error fetching NOAA marine forecast: {e}")
+                break
+        
+        if not all_data:
+            logger.warning("No NOAA marine forecast data retrieved")
+            return pd.DataFrame()
+        
+        # Convert to DataFrame and filter by date range
+        df = pd.DataFrame(all_data)
+        df = df[(df['timestamp'] >= start_date) & (df['timestamp'] <= end_date)]
+        
+        # Remove duplicates, keeping the first occurrence
+        df = df.drop_duplicates(subset=['timestamp'], keep='first')
+        
+        # Sort by timestamp
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        
+        logger.info(f"Retrieved {len(df)} hours of NOAA marine forecast data")
+        return df
+    
+    def is_available(self) -> bool:
+        """Check if NOAA marine forecast service is available"""
+        import requests
+        try:
+            url = self._generate_url(0)
+            response = requests.get(url, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
+
 class DataCollector:
     """Main data collection coordinator using multiple sources"""
     
@@ -1444,17 +2213,21 @@ class DataCollector:
                 ),
                 'pacioos': PacIOOSCurrentSource(),  # Fallback
                 'noaa': NOAACurrentSource(),
-                'ndbc': NDFCBuoySource(),
+                'noaa_marine': NOAAMarineSource(),  # Primary wind & wave source
+                'ndbc': NDFCBuoySource(),  # Fallback wind source
                 'openmeteo': OpenMeteoWindSource(),
-                'noaa_weather': NOAAWeatherBuoySource()
+                'noaa_weather': NOAAWeatherBuoySource(),
+                'noaa_cwf': NOAACWFWindSource()  # Coastal Waters Forecast
             }
         else:
             self.sources = {
                 'pacioos': PacIOOSCurrentSource(),
                 'noaa': NOAACurrentSource(),
-                'ndbc': NDFCBuoySource(),
+                'noaa_marine': NOAAMarineSource(),  # Primary wind & wave source
+                'ndbc': NDFCBuoySource(),  # Fallback wind source
                 'openmeteo': OpenMeteoWindSource(),
-                'noaa_weather': NOAAWeatherBuoySource()
+                'noaa_weather': NOAAWeatherBuoySource(),
+                'noaa_cwf': NOAACWFWindSource()  # Coastal Waters Forecast
             }
         self.tidal_analyzer = TidalCurrentAnalyzer()
         
@@ -1525,17 +2298,23 @@ class DataCollector:
             logger.warning("No real current data available from APIs")
             current_source_quality = 'simulation'
         
-        # Get wind data from multiple sources
+                # Get wind data from multiple sources
+        noaa_marine_data = all_data.get('noaa_marine', pd.DataFrame())  # Primary source with wave height
         wind_data = all_data.get('ndbc', pd.DataFrame())
         noaa_weather_data = all_data.get('noaa_weather', pd.DataFrame())
         openmeteo_wind_data = all_data.get('openmeteo', pd.DataFrame())
+        noaa_cwf_data = all_data.get('noaa_cwf', pd.DataFrame())
         
-        # Smart wind data selection with quality prioritization
+                # Smart wind data selection with quality prioritization
         wind_source_priority = []
+        if not noaa_marine_data.empty:
+            wind_source_priority.append(('noaa_marine', noaa_marine_data, 'official_forecast'))
         if not wind_data.empty:
             wind_source_priority.append(('ndbc', wind_data, 'observed'))
         if not noaa_weather_data.empty:
             wind_source_priority.append(('noaa_weather', noaa_weather_data, 'observed'))
+        if not noaa_cwf_data.empty:
+            wind_source_priority.append(('noaa_cwf', noaa_cwf_data, 'official_forecast'))
         if not openmeteo_wind_data.empty:
             wind_source_priority.append(('openmeteo', openmeteo_wind_data, 'forecast'))
         
@@ -1548,10 +2327,10 @@ class DataCollector:
             logger.info(f"Available wind sources: {[f'{name}({quality})' for name, _, quality in wind_source_priority]}")
         
         if current_data is None or current_data.empty:
-            logger.info("Falling back to enhanced tidal current simulation")
-            logger.info("Simulation uses multiple harmonic components for realistic variability")
-            current_data = self.tidal_analyzer.generate_tidal_simulation(start_date, end_date)
-            current_source_quality = 'simulation'
+            logger.error("CRITICAL: No real current data available from any API source")
+            logger.error("LUMPS requires real oceanographic data - simulation disabled per user request")
+            logger.error("Please check API connectivity or try different date ranges")
+            return pd.DataFrame()  # Return empty - no simulation fallback
         
         # Debug current directions before analysis
         self.tidal_analyzer.debug_current_directions(current_data)
@@ -1573,14 +2352,32 @@ class DataCollector:
             if hasattr(dt, 'tz') and dt.tz is not None:
                 dt = dt.tz_localize(None)
             
-            # Find matching wind data with quality prioritization
+                        # Find matching wind data with quality prioritization
             wind_dir = None
             wind_speed = None
+            wind_wave_height = None
             wind_source = None
             wind_quality = None
             
-            # Priority 1: NDBC buoy data (real observations, highest quality)
-            if not wind_data.empty:
+                                    # Priority 1: NOAA Marine forecast data (includes wind wave height, highest priority)
+            if not noaa_marine_data.empty:
+                try:
+                    # Check if data has 'timestamp' or 'datetime' column
+                    time_col = 'timestamp' if 'timestamp' in noaa_marine_data.columns else 'datetime'
+                    time_diff = abs(noaa_marine_data[time_col] - dt)
+                    if time_diff.min() <= timedelta(hours=1):
+                        closest_wind = noaa_marine_data.loc[time_diff.idxmin()]
+                        wind_dir = closest_wind.get('wind_dir_deg', closest_wind.get('wind_dir', 90))
+                        wind_speed = closest_wind.get('wind_speed_kts', closest_wind.get('wind_speed', 0))
+                        wind_wave_height = closest_wind.get('wind_wave_height_ft', 0.0)
+                        wind_source = 'NOAA_Marine'
+                        wind_quality = 'official_forecast'
+                        logger.debug(f"Using NOAA Marine forecast data for {dt}")
+                except (TypeError, KeyError) as e:
+                    logger.debug(f"Error with NOAA Marine data: {e}")
+            
+                                    # Priority 2: NDBC buoy data (real observations, highest quality)
+            if (wind_dir is None or pd.isna(wind_dir)) and not wind_data.empty:
                 try:
                     time_diff = abs(wind_data['datetime'] - dt)
                     if time_diff.min() <= timedelta(hours=1):
@@ -1593,7 +2390,7 @@ class DataCollector:
                 except TypeError as e:
                     logger.debug(f"Timezone mismatch with NDBC data: {e}")
             
-            # Priority 2: NOAA Weather Buoy data (real observations, high quality)
+                        # Priority 3: NOAA Weather Buoy data (real observations, high quality)
             if (wind_dir is None or pd.isna(wind_dir)) and not noaa_weather_data.empty:
                 time_diff = abs(noaa_weather_data['datetime'] - dt)
                 if time_diff.min() <= timedelta(hours=1):
@@ -1604,7 +2401,18 @@ class DataCollector:
                     wind_quality = 'observed'
                     logger.debug(f"Using NOAA weather buoy data for {dt}")
             
-            # Priority 3: Open-Meteo forecast data (model forecast, good quality)
+                        # Priority 4: NOAA CWF data (official marine forecast, excellent quality)
+            if (wind_dir is None or pd.isna(wind_dir)) and not noaa_cwf_data.empty:
+                time_diff = abs(noaa_cwf_data['datetime'] - dt)
+                if time_diff.min() <= timedelta(hours=3):  # Allow 3-hour window for official forecasts
+                    closest_wind = noaa_cwf_data.loc[time_diff.idxmin()]
+                    wind_dir = closest_wind['wind_dir']
+                    wind_speed = closest_wind['wind_speed']
+                    wind_source = 'NOAA_CWF'
+                    wind_quality = 'official_forecast'
+                    logger.debug(f"Using NOAA Coastal Waters Forecast data for {dt}")
+            
+                        # Priority 5: Open-Meteo forecast data (model forecast, good quality)
             if (wind_dir is None or pd.isna(wind_dir)) and not openmeteo_wind_data.empty:
                 time_diff = abs(openmeteo_wind_data['datetime'] - dt)
                 if time_diff.min() <= timedelta(hours=2):  # Allow 2-hour window for forecasts
@@ -1635,7 +2443,7 @@ class DataCollector:
             
             # Include ALL surfable conditions - not just optimal standing waves
             if interaction.get('surfable_conditions', False):
-                optimal_conditions.append({
+                                optimal_conditions.append({
                     'datetime': dt,
                     'current_speed': current_row['current_speed'],
                     'current_dir': current_row['current_dir'],
@@ -1643,6 +2451,7 @@ class DataCollector:
                     'current_quality': current_source_quality,
                     'wind_speed': wind_speed,
                     'wind_dir': wind_dir,
+                    'wind_wave_height_ft': wind_wave_height if wind_wave_height is not None else 0.0,
                     'wind_source': wind_source,
                     'wind_quality': wind_quality,
                     'interaction': interaction,

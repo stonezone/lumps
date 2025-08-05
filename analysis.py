@@ -18,14 +18,20 @@ class ConditionAnalyzer:
     def __init__(self):
         self.trade_wind_range = (50, 70)  # ENE direction range
         self.optimal_wind_speed = (15, 25)  # Optimal wind speed range
-        self.eastward_current_range = (60, 120)  # Eastward flow range
+        self.eastward_current_range = (10, 80)  # Coast-parallel eastward flow range
         
     def classify_conditions(self, wind_speed: float, current_speed: float, 
-                      interaction_type: str, angle_difference: float,
-                      is_eastward: bool, tidal_enhancement: float = 0.0) -> Dict:
+                          interaction_type: str, angle_difference: float,
+                          is_eastward: bool, tidal_enhancement: float = 0.0,
+                          wind_wave_height: float = 0.0) -> Dict:
         """
-        Classify conditions with wind + current + tide scoring
-        Total possible: 15 points (5 wind + 5 current + 5 tide)
+        Classify conditions with wind + current + tide + wave scoring
+        Total possible: 20 points (5 wind + 5 current + 5 tide + 5 wave)
+        
+        CRITICAL: Wind is the PRIMARY driver of lumps
+        - <12kt wind = minimal lumps regardless of current (marginal only)
+        - 12-15kt wind = light lumps (moderate max)
+        - 15kt+ wind = proper conditions for scoring
         """
         
         # Wind component (0-5 points)
@@ -61,34 +67,67 @@ class ConditionAnalyzer:
         # Tidal component (0-5 points)
         tidal_score = int(tidal_enhancement * 5)  # Convert 0-1 scale to 0-5 points
         
-        # Total score determines quality (now out of 15)
-        total_score = wind_score + current_score + tidal_score
-        
-        if total_score >= 13:
-            quality = "prime"
-            skill_level = "expert"
-        elif total_score >= 10:
-            quality = "excellent"
-            skill_level = "advanced"
-        elif total_score >= 7:
-            quality = "good"
-            skill_level = "intermediate"
-        elif total_score >= 4:
-            quality = "moderate"
-            skill_level = "beginner"
+        # Wind wave height component (0-5 points)
+        # Critical for downwind foiling - bigger lumps = better conditions
+        if wind_wave_height >= 5:
+            wave_score = 5
+        elif wind_wave_height >= 4:
+            wave_score = 4
+        elif wind_wave_height >= 3:
+            wave_score = 3
+        elif wind_wave_height >= 2:
+            wave_score = 2
+        elif wind_wave_height >= 1:
+            wave_score = 1
         else:
+            wave_score = 0
+        
+        # Total score determines quality (now out of 20)
+        total_score = wind_score + current_score + tidal_score + wave_score
+        
+        # CRITICAL: Wind is the primary requirement for lumps
+        # Without sufficient wind (15kt+), downgrade ratings regardless of current/tide
+        if wind_speed < 12:
+            # Minimal wind = minimal lumps, cap quality at marginal
             quality = "marginal"
             skill_level = "challenging"
+        elif wind_speed < 15:
+            # Light wind, cap quality at moderate regardless of other factors
+            if total_score >= 9:
+                quality = "moderate"
+                skill_level = "intermediate"
+            else:
+                quality = "marginal"
+                skill_level = "challenging"
+        else:
+            # Good wind (15kt+), use full scoring system
+            if total_score >= 17:
+                quality = "prime"
+                skill_level = "expert"
+            elif total_score >= 13:
+                quality = "excellent"
+                skill_level = "advanced"
+            elif total_score >= 9:
+                quality = "good"
+                skill_level = "intermediate"
+            elif total_score >= 5:
+                quality = "moderate"
+                skill_level = "beginner"
+            else:
+                quality = "marginal"
+                skill_level = "challenging"
         
         # Enhanced debug info
-        debug = f"W{wind_score}+C{current_score}+T{tidal_score}={total_score}/15"
+        debug = f"W{wind_score}+C{current_score}+T{tidal_score}+Wv{wave_score}={total_score}/20"
         
         return {
             'quality': quality,
             'skill_level': skill_level,
             'wind_speed': wind_speed,
             'current_speed': current_speed,
+            'wind_wave_height': wind_wave_height,
             'tidal_score': tidal_score,
+            'wave_score': wave_score,
             'total_score': total_score,
             'scoring_debug': debug,
             'is_true_eastward': is_eastward,
@@ -141,13 +180,17 @@ class ConditionAnalyzer:
             is_eastward = interaction.get('is_eastward_current', False)
             angle_difference = interaction.get('angle_difference', 0.0)
             
+                        # Get wind wave height if available
+            wind_wave_height = row.get('wind_wave_height_ft', 0.0)
+            
             classification = self.classify_conditions(
                 row['wind_speed'], 
                 row['current_speed'],
                 interaction['interaction_type'],
                 angle_difference,
                 is_eastward,
-                tidal_enhancement
+                tidal_enhancement,
+                wind_wave_height
             )
             
             analyzed_conditions.append({
@@ -245,7 +288,7 @@ class ReportGenerator:
         report_lines.append(f"Analysis period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         report_lines.append("")
         report_lines.append("📊 DATA SOURCE LEGEND:")
-        report_lines.append("Wind: 📡=Observed (NDBC buoy) | 🌐=Forecast (OpenMeteo)")
+        report_lines.append("Wind: 📡=Observed (NDBC buoy) | 📈=Official forecast (NOAA CWF) | 🌐=Model forecast (OpenMeteo)")
         report_lines.append("Current: 🌊=Model forecast (PacIOOS) | 🌙=Tidal predictions (NOAA) | 🔬=Simulation")
         report_lines.append("=" * 80)
         
@@ -272,7 +315,7 @@ class ReportGenerator:
                 quality_label = condition['quality'].upper()
                 
                 # Add data source quality indicators
-                wind_quality_icon = "📡" if condition.get('wind_quality') == 'observed' else "🌐" if condition.get('wind_quality') == 'forecast' else "❓"
+                wind_quality_icon = "📡" if condition.get('wind_quality') == 'observed' else "📈" if condition.get('wind_quality') == 'official_forecast' else "🌐" if condition.get('wind_quality') == 'forecast' else "❓"
                 current_quality_icon = "🌊" if condition.get('current_quality') == 'model_forecast' else "🌙" if condition.get('current_quality') == 'tidal_predictions' else "🔬" if condition.get('current_quality') == 'simulation' else "❓"
                 
                 # Get tidal and scoring info

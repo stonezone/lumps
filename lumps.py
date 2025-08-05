@@ -164,6 +164,62 @@ def save_web_data(conditions_df, start_date, end_date, output_dir='web/data'):
     # Get current conditions (most recent entry)
     current_entry = conditions_df.iloc[0] if not conditions_df.empty else None
     
+    def get_quality_emoji(quality):
+        """Get emoji for quality level matching CLI output"""
+        quality_map = {
+            'EXCELLENT': '⭐',
+            'GOOD': '✅', 
+            'MODERATE': '🌀',
+            'MARGINAL': '😐',
+            'POOR': '❌'
+        }
+        return quality_map.get(quality, '🌀')
+    
+    def format_cli_entry(row):
+        """Format a single entry like CLI output"""
+        dt = row.get('datetime')
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        
+        time_str = dt.strftime('%I:%M %p') if dt else 'N/A'
+        
+        # Parse interaction data for tidal info
+        interaction = row.get('interaction', {})
+        if isinstance(interaction, str):
+            try:
+                import ast
+                interaction = ast.literal_eval(interaction)
+            except (ValueError, SyntaxError):
+                interaction = {}
+        
+        # Get quality and emoji
+        quality = row.get('quality', 'MODERATE').upper()
+        emoji = get_quality_emoji(quality)
+        
+        # Wind and current info
+        wind_speed = row.get('wind_speed', 0)
+        wind_dir = row.get('wind_dir', 0)
+        current_speed = row.get('current_speed', 0)
+        current_dir = row.get('current_dir', 0)
+        
+        # Tide info from interaction data
+        tidal_phase = interaction.get('tidal_phase', 'N/A')
+        
+        # Scoring info (if available)
+        scoring_debug = row.get('scoring_debug', 'N/A')
+        total_score = row.get('total_score', 0)
+        
+        return {
+            'time': time_str,
+            'quality_emoji': emoji,
+            'quality': quality,
+            'wind_display': f"🌐{wind_speed:.1f}kt@{wind_dir:03.0f}°",
+            'current_display': f"🌊{current_speed:.1f}kt@{current_dir:03.0f}°",
+            'tide_display': tidal_phase,
+            'score_display': scoring_debug if scoring_debug != 'N/A' else f"Score: {total_score}/15",
+            'cli_format': f"{time_str} | {emoji} {quality} | Wind: 🌐{wind_speed:.1f}kt@{wind_dir:03.0f}° | Current: 🌊{current_speed:.1f}kt@{current_dir:03.0f}° | Tide: {tidal_phase} | {scoring_debug if scoring_debug != 'N/A' else f'Score: {total_score}/15'}"
+        }
+    
     # Calculate score for current conditions
     def calculate_web_score(row):
         if row is None:
@@ -199,6 +255,35 @@ def save_web_data(conditions_df, start_date, end_date, output_dir='web/data'):
         else:
             return 'POOR'
     
+    # Group data by day for CLI-style breakdown
+    daily_data = {}
+    
+    for _, row in conditions_df.iterrows():
+        dt = row.get('datetime')
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        
+        if dt:
+            date_key = dt.strftime('%Y-%m-%d')
+            day_name = dt.strftime('%A, %B %d, %Y')
+            
+            if date_key not in daily_data:
+                daily_data[date_key] = {
+                    'date': date_key,
+                    'day_name': day_name,
+                    'conditions': []
+                }
+            
+            daily_data[date_key]['conditions'].append(format_cli_entry(row))
+    
+    # Convert to list sorted by date
+    daily_breakdown = []
+    for date_key in sorted(daily_data.keys()):
+        day_data = daily_data[date_key]
+        # Sort conditions by time within each day
+        day_data['conditions'].sort(key=lambda x: x['time'])
+        daily_breakdown.append(day_data)
+    
     # Build web data structure
     current_score = calculate_web_score(current_entry)
     
@@ -219,6 +304,7 @@ def save_web_data(conditions_df, start_date, end_date, output_dir='web/data'):
             },
             'enhancement': current_entry.get('enhancement', 'none') if current_entry is not None else 'none'
         },
+        'daily_breakdown': daily_breakdown,
         'timeline': []
     }
     
@@ -229,8 +315,12 @@ def save_web_data(conditions_df, start_date, end_date, output_dir='web/data'):
         # Parse interaction data if it exists
         interaction = row.get('interaction', {})
         if isinstance(interaction, str):
-            # Handle case where interaction might be a string
-            interaction = {}
+            # Parse the string representation of the dictionary
+            try:
+                import ast
+                interaction = ast.literal_eval(interaction)
+            except (ValueError, SyntaxError):
+                interaction = {}
         
         web_data['timeline'].append({
             'datetime': datetime_str,

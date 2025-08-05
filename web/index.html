@@ -54,7 +54,10 @@
                 <h1 class="text-2xl font-bold">LUMPS 🌊</h1>
                 <span class="text-gray-300">North Shore</span>
             </div>
-            <button class="glass rounded-lg p-2 text-sm">Settings</button>
+            <button @click="refreshData()" class="glass rounded-lg p-2 text-sm hover:bg-white/20 transition-colors" :disabled="refreshing">
+                <span x-show="!refreshing">🔄 Refresh</span>
+                <span x-show="refreshing">⏳ Updating...</span>
+            </button>
         </header>
 
         <!-- Loading State -->
@@ -93,6 +96,38 @@
                 
                 <div class="mt-4 text-xs text-gray-400">
                     Updated: <span x-text="formatTime(data.generated)"></span>
+                </div>
+            </div>
+
+            <!-- Daily Breakdown - CLI Style -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="text-xl font-bold mb-4">📅 Daily Forecast</h3>
+                <div class="space-y-6">
+                    <template x-for="(day, dayIndex) in data.daily_breakdown || []" :key="day.date">
+                        <div class="border border-gray-600 rounded-lg p-4">
+                            <h4 class="text-lg font-bold mb-3 flex items-center space-x-2">
+                                <span>📅</span>
+                                <span x-text="'Day ' + (dayIndex + 1) + ': ' + day.day_name"></span>
+                            </h4>
+                            <div class="border-t border-gray-600 my-3"></div>
+                            
+                            <div class="space-y-2" x-show="day.conditions && day.conditions.length > 0">
+                                <template x-for="condition in day.conditions" :key="condition.time">
+                                    <div class="font-mono text-sm p-2 rounded bg-gray-800/50 hover:bg-gray-700/50 transition-colors">
+                                        <span x-text="condition.cli_format"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            
+                            <div x-show="!day.conditions || day.conditions.length === 0" class="text-gray-400 text-center py-4">
+                                No optimal conditions found for this day
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <div x-show="!data.daily_breakdown || data.daily_breakdown.length === 0" class="text-gray-400 text-center py-8">
+                        No forecast data available
+                    </div>
                 </div>
             </div>
 
@@ -196,6 +231,7 @@
             return {
                 loading: true,
                 error: false,
+                refreshing: false,
                 data: {},
                 forecast: [],
                 detailedConditions: [],
@@ -205,7 +241,7 @@
                     'NDBC_Buoy': '📡',
                     'OpenMeteo_Forecast': '🌐', 
                     'PacIOOS_ROMS_Hawaii': '🌊',
-                    'Simulation': '⚠️'
+                    'PacIOOS_Enhanced': '🌊'
                 },
 
                 async loadData() {
@@ -226,6 +262,20 @@
                         this.error = true;
                         this.loading = false;
                     }
+                },
+
+                async refreshData() {
+                    this.refreshing = true;
+                    
+                    // Show a simple alert for now - user needs to run ./webui.sh refresh manually
+                    alert('To refresh data, run "./webui.sh refresh" in your terminal, then reload this page.');
+                    
+                    // Alternatively, just reload the page after a delay to pick up any new data
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                    
+                    this.refreshing = false;
                 },
 
                 generateForecast() {
