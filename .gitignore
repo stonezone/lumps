@@ -30,10 +30,14 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
-
+.serena
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+data/
+tests/
+web/
+webui.sh
 
 # Unit test / coverage reports
 htmlcov/
