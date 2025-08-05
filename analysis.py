@@ -21,71 +21,92 @@ class ConditionAnalyzer:
         self.eastward_current_range = (60, 120)  # Eastward flow range
         
     def classify_conditions(self, wind_speed: float, current_speed: float, 
-                          interaction_type: str) -> Dict:
-        """EXPANDED condition classification for comprehensive downwind analysis"""
+                      interaction_type: str, angle_difference: float,
+                      is_eastward: bool, tidal_enhancement: float = 0.0) -> Dict:
+        """
+        Classify conditions with wind + current + tide scoring
+        Total possible: 15 points (5 wind + 5 current + 5 tide)
+        """
         
-        # LOWERED wind speed thresholds to capture more viable conditions
+        # Wind component (0-5 points)
         if wind_speed >= 22:
-            base_quality = "prime"
-            skill_level = "expert"
+            wind_score = 5
         elif wind_speed >= 18:
-            base_quality = "excellent" 
-            skill_level = "advanced"
+            wind_score = 4
         elif wind_speed >= 15:
-            base_quality = "good"
-            skill_level = "intermediate"
-        elif wind_speed >= 12:  # LOWERED from 15 to include light wind conditions
-            base_quality = "moderate"
-            skill_level = "intermediate_light"
-        elif wind_speed >= 8:   # ADDED new category for very light conditions
-            base_quality = "light"
-            skill_level = "experienced_light"
+            wind_score = 3
+        elif wind_speed >= 12:
+            wind_score = 2
+        elif wind_speed >= 8:
+            wind_score = 1
         else:
-            base_quality = "marginal"
-            skill_level = "calm_conditions"
+            wind_score = 0
         
-        # Enhanced current-wind interaction bonuses (more generous)
-        interaction_bonus = False
-        if current_speed >= 0.05:  # Very low threshold for current sensitivity
-            if interaction_type.startswith("current_into_wind"):
-                interaction_bonus = True
-                if base_quality == "moderate":
-                    base_quality = "good"
-                elif base_quality == "light":
-                    base_quality = "moderate"
-                elif base_quality == "marginal":
-                    base_quality = "light"
-            elif interaction_type == "current_cross_wind" and current_speed >= 0.1:
-                interaction_bonus = True
-                # Cross flow can also enhance conditions
-                if base_quality == "light":
-                    base_quality = "moderate"
-            elif interaction_type == "current_with_wind" and current_speed >= 0.15:
-                interaction_bonus = True
-                # Following current can create rideable following seas
-                if base_quality == "moderate":
-                    base_quality = "good"
+        # Current component (0-5 points) - ONLY for true eastward flow!
+        current_score = 0
+        if is_eastward and interaction_type.startswith("current_into_wind"):
+            if current_speed >= 0.8:
+                current_score = 5
+            elif current_speed >= 0.5:
+                current_score = 4
+            elif current_speed >= 0.3:
+                current_score = 3
+            elif current_speed >= 0.2:
+                current_score = 2
+            else:
+                current_score = 1
+        elif not is_eastward:
+            current_score = 0  # No points for non-eastward flow
+        
+        # Tidal component (0-5 points)
+        tidal_score = int(tidal_enhancement * 5)  # Convert 0-1 scale to 0-5 points
+        
+        # Total score determines quality (now out of 15)
+        total_score = wind_score + current_score + tidal_score
+        
+        if total_score >= 13:
+            quality = "prime"
+            skill_level = "expert"
+        elif total_score >= 10:
+            quality = "excellent"
+            skill_level = "advanced"
+        elif total_score >= 7:
+            quality = "good"
+            skill_level = "intermediate"
+        elif total_score >= 4:
+            quality = "moderate"
+            skill_level = "beginner"
+        else:
+            quality = "marginal"
+            skill_level = "challenging"
+        
+        # Enhanced debug info
+        debug = f"W{wind_score}+C{current_score}+T{tidal_score}={total_score}/15"
         
         return {
-            'quality': base_quality,
+            'quality': quality,
             'skill_level': skill_level,
             'wind_speed': wind_speed,
             'current_speed': current_speed,
-            'interaction_bonus': interaction_bonus,
-            'recommendation': self._get_recommendation(base_quality, skill_level, interaction_bonus)
+            'tidal_score': tidal_score,
+            'total_score': total_score,
+            'scoring_debug': debug,
+            'is_true_eastward': is_eastward,
+            'tidal_enhancement': tidal_enhancement,
+            'recommendation': self._get_recommendation(quality, skill_level, is_eastward, tidal_score)
         }
     
-    def _get_recommendation(self, quality: str, skill_level: str, interaction_bonus: bool = False) -> str:
+    def _get_recommendation(self, quality: str, skill_level: str, is_eastward: bool = False, tidal_score: int = 0) -> str:
         """Generate text recommendation based on conditions"""
-        bonus_text = " + current interaction bonus" if interaction_bonus else ""
+        eastward_text = " - TRUE eastward current" if is_eastward else ""
+        tidal_text = f" - Tidal bonus: {tidal_score}/5" if tidal_score > 0 else ""
         
         recommendations = {
-            'prime': f"🔥 PRIME conditions - {skill_level} level - Maximum wave enhancement{bonus_text}",
-            'excellent': f"⭐ EXCELLENT conditions - {skill_level} level - Strong wave enhancement{bonus_text}", 
-            'good': f"✅ GOOD conditions - {skill_level} level - Moderate wave enhancement{bonus_text}",
-            'moderate': f"🌀 MODERATE conditions - {skill_level} level - Light wave enhancement{bonus_text}",
-            'light': f"💨 LIGHT conditions - {skill_level} level - Subtle wave interaction{bonus_text}",
-            'marginal': f"😐 MARGINAL conditions - {skill_level} level - Minimal enhancement{bonus_text}"
+            'prime': f"🔥 PRIME conditions - {skill_level} level - Maximum wave enhancement{eastward_text}{tidal_text}",
+            'excellent': f"⭐ EXCELLENT conditions - {skill_level} level - Strong wave enhancement{eastward_text}{tidal_text}", 
+            'good': f"✅ GOOD conditions - {skill_level} level - Moderate wave enhancement{eastward_text}{tidal_text}",
+            'moderate': f"🌀 MODERATE conditions - {skill_level} level - Light wave enhancement{eastward_text}{tidal_text}",
+            'marginal': f"😐 MARGINAL conditions - {skill_level} level - Minimal enhancement{eastward_text}{tidal_text}"
         }
         return recommendations.get(quality, "Conditions analyzed")
     
@@ -114,10 +135,19 @@ class ConditionAnalyzer:
         analyzed_conditions = []
         for _, row in conditions_data.iterrows():
             interaction = row['interaction']
+            
+            # Get tidal enhancement and eastward status from interaction data
+            tidal_enhancement = interaction.get('tidal_enhancement', 0.0)
+            is_eastward = interaction.get('is_eastward_current', False)
+            angle_difference = interaction.get('angle_difference', 0.0)
+            
             classification = self.classify_conditions(
                 row['wind_speed'], 
                 row['current_speed'],
-                interaction['interaction_type']
+                interaction['interaction_type'],
+                angle_difference,
+                is_eastward,
+                tidal_enhancement
             )
             
             analyzed_conditions.append({
@@ -134,7 +164,13 @@ class ConditionAnalyzer:
                 'skill_level': classification['skill_level'],
                 'recommendation': classification['recommendation'],
                 'enhancement': row['enhancement'],
-                'flow_direction': row['flow_direction']
+                'flow_direction': row['flow_direction'],
+                # Add new tidal and scoring data
+                'tidal_phase': interaction.get('tidal_phase', 'N/A'),
+                'tidal_enhancement': tidal_enhancement,
+                'scoring_debug': classification.get('scoring_debug', 'N/A'),
+                'total_score': classification.get('total_score', 0),
+                'is_true_eastward': is_eastward
             })
         
         df = pd.DataFrame(analyzed_conditions)
@@ -239,12 +275,17 @@ class ReportGenerator:
                 wind_quality_icon = "📡" if condition.get('wind_quality') == 'observed' else "🌐" if condition.get('wind_quality') == 'forecast' else "❓"
                 current_quality_icon = "🌊" if condition.get('current_quality') == 'model_forecast' else "🌙" if condition.get('current_quality') == 'tidal_predictions' else "🔬" if condition.get('current_quality') == 'simulation' else "❓"
                 
+                # Get tidal and scoring info
+                tidal_phase = condition.get('tidal_phase', 'N/A')
+                scoring_debug = condition.get('scoring_debug', 'N/A')
+                
                 report_lines.append(
                     f"{dt.strftime('%I:%M %p')} | "
                     f"{emoji} {quality_label} | "
                     f"Wind: {wind_quality_icon}{condition['wind_speed']:.1f}kt@{condition['wind_dir']:03.0f}° | "
                     f"Current: {current_quality_icon}{condition['current_speed']:.1f}kt@{condition['current_dir']:03.0f}° | "
-                    f"Enhancement: {condition['enhancement']}"
+                    f"Tide: {tidal_phase} | "
+                    f"Score: {scoring_debug}"
                 )
         
         # Summary statistics

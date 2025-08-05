@@ -643,8 +643,8 @@ class PacIOOSEnhancedCurrentSource(DataSource):
         if merged_df.empty:
             return pd.DataFrame()
         
-        # Convert string timestamps to pandas datetime
-        merged_df['time'] = pd.to_datetime(merged_df['time'])
+        # Convert string timestamps to pandas datetime (ensure tz-naive)
+        merged_df['time'] = pd.to_datetime(merged_df['time']).dt.tz_localize(None)
         
         # Ensure velocity columns are numeric and remove NaN values
         merged_df['u_velocity'] = pd.to_numeric(merged_df['u_velocity'], errors='coerce')
@@ -684,7 +684,7 @@ class PacIOOSEnhancedCurrentSource(DataSource):
                 center_lon = timestamp_data['longitude'].median()
                 
                 aggregated_data.append({
-                    'datetime': timestamp,
+                    'datetime': timestamp if isinstance(timestamp, datetime) else pd.to_datetime(timestamp).tz_localize(None),  # Convert to tz-naive
                     'current_speed': avg_speed,
                     'current_dir': representative_dir,
                     'latitude': center_lat,
@@ -1049,85 +1049,107 @@ class TidalCurrentAnalyzer:
     
     def find_eastward_flow_periods(self, current_data: pd.DataFrame) -> pd.DataFrame:
         """
-        Find periods when current flows in directions favorable for North Shore foiling
-        EXPANDED CRITERIA: Any current that can interact with wind to create surfable conditions
+        Find periods of eastward flow that can oppose ENE trade winds
+        Optimal range: ENE to ESE (060-120°) for true eastward opposition
         """
         try:
             if current_data.empty:
                 return pd.DataFrame()
             
-            # COMPREHENSIVE flow criteria for downwind foiling:
-            # Accept ANY current direction that can create wave enhancement
-            # Focus on finding periods with measurable current speed (>0.05 kt)
-            # rather than restricting by direction
+            # TRUE eastward flow criteria for opposing ENE trades:
+            # - Direction: 060-120° (ENE through ESE - proper eastward flow)
+            # - This opposes typical ENE trade winds (050-070°)
+            # - Speed: >= 0.1 knots (meaningful current for wave enhancement)
             
-            # Minimum current speed threshold for viable wave interaction
-            min_current_speed = 0.05  # knots - very sensitive to detect all possible conditions
+            # True eastward flow that opposes ENE trade winds (050-070°)
+            # Optimal range: ENE to ESE (060-120°) 
+            eastward_mask = (
+                (current_data['current_dir'] >= 60) &    # ENE (060°)
+                (current_data['current_dir'] <= 120) &   # ESE (120°)
+                (current_data['current_speed'] >= 0.1)   # Meaningful current
+            )
             
-            # Accept all current directions but prioritize by interaction potential
-            favorable_mask = current_data['current_speed'] >= min_current_speed
+            eastward_periods = current_data[eastward_mask].copy()
             
-            favorable_periods = current_data[favorable_mask].copy()
-            
-            if not favorable_periods.empty:
-                # Enhanced classification including ALL flow types
-                def classify_flow_type(direction):
-                    if 315 <= direction <= 360 or 0 <= direction <= 45:
-                        return 'northward'
-                    elif 45 < direction <= 135:
-                        return 'eastward'  
-                    elif 135 < direction <= 225:
-                        return 'southward'
-                    elif 225 < direction <= 315:
-                        return 'westward'
-                    else:
-                        return 'variable'
-                
-                def assess_interaction_potential(direction):
-                    """Assess how well current direction interacts with typical ENE trades (060°)"""
-                    # ENE trades typically 050-070°, use 060° as reference
-                    trade_wind_dir = 60
-                    angle_diff = abs(direction - trade_wind_dir)
-                    if angle_diff > 180:
-                        angle_diff = 360 - angle_diff
-                    
-                    # Current flowing into wind (small angle) = high potential
-                    # Current flowing with wind (large angle) = moderate potential  
-                    # Cross current = variable potential
-                    if angle_diff <= 30:
-                        return 'high_opposing'      # Current into wind - best for lumps
-                    elif angle_diff >= 150:
-                        return 'moderate_following' # Current with wind - still surfable
-                    else:
-                        return 'cross_flow'         # Cross current - variable enhancement
-                
-                favorable_periods['flow_type'] = favorable_periods['current_dir'].apply(classify_flow_type)
-                favorable_periods['interaction_potential'] = favorable_periods['current_dir'].apply(assess_interaction_potential)
-                favorable_periods['toward_turtle_bay'] = True  # All current can affect foiling
-                
-                # Calculate eastward component for compatibility
-                favorable_periods['eastward_component'] = np.cos(
-                    np.radians(favorable_periods['current_dir'] - 90)
+            if not eastward_periods.empty:
+                # Categorize the flow directions within eastward range
+                eastward_periods['flow_category'] = pd.cut(
+                    eastward_periods['current_dir'],
+                    bins=[60, 75, 90, 105, 120],
+                    labels=['ENE', 'E-ENE', 'E', 'E-ESE'],
+                    include_lowest=True
                 )
                 
-                # Log comprehensive statistics
-                flow_types = favorable_periods['flow_type'].value_counts()
-                interaction_types = favorable_periods['interaction_potential'].value_counts()
+                # Add tidal enhancement
+                eastward_periods['tidal_enhancement'] = eastward_periods['datetime'].apply(
+                    lambda dt: self._calculate_tidal_phase_enhancement(dt)
+                )
+                eastward_periods['tidal_phase'] = eastward_periods['datetime'].apply(
+                    lambda dt: self._get_tidal_phase_description(dt)
+                )
                 
-                logger.info(f"Found {len(favorable_periods)} periods of current flow >= {min_current_speed} kt")
-                logger.info(f"Flow types: {dict(flow_types)}")
-                logger.info(f"Interaction potential: {dict(interaction_types)}")
+                # Log what we found
+                flow_counts = eastward_periods['flow_category'].value_counts()
+                logger.info(f"Found {len(eastward_periods)} eastward flow periods (060-120°)")
+                logger.info(f"Flow breakdown: {flow_counts.to_dict()}")
+                logger.info(f"Average current speed: {eastward_periods['current_speed'].mean():.2f} kt")
                 
-            return favorable_periods
+                # Log NE currents specifically since user sees them
+                ne_currents = eastward_periods[eastward_periods['flow_category'] == 'NE']
+                if not ne_currents.empty:
+                    logger.info(f"NE currents (030-060°): {len(ne_currents)} periods found")
+                
+                eastward_periods['is_true_eastward'] = True
+            else:
+                logger.warning("NO EASTWARD CURRENTS FOUND (060-120°)")
+                # Debug: show what directions ARE in the data
+                if not current_data.empty:
+                    dir_summary = current_data.groupby(pd.cut(current_data['current_dir'], 
+                        bins=[0, 45, 90, 135, 180, 225, 270, 315, 360]))['current_dir'].count()
+                    logger.info(f"Current directions in data: {dir_summary.to_dict()}")
+                
+            return eastward_periods
             
         except Exception as e:
-            logger.error(f"Error analyzing current flow: {e}")
+            logger.error(f"Error analyzing eastward flow: {e}")
             return pd.DataFrame()
+
+    def debug_current_directions(self, current_data: pd.DataFrame):
+        """Debug function to see actual current directions"""
+        if current_data.empty:
+            logger.info("DEBUG: No current data to analyze")
+            return
+            
+        logger.info("DEBUG: Current direction distribution")
+        logger.info(f"Total records: {len(current_data)}")
+        
+        # Group by 45-degree sectors
+        bins = [0, 45, 90, 135, 180, 225, 270, 315, 360]
+        labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        current_data['sector'] = pd.cut(current_data['current_dir'], bins=bins, labels=labels)
+        
+        sector_counts = current_data['sector'].value_counts().sort_index()
+        for sector, count in sector_counts.items():
+            avg_speed = current_data[current_data['sector'] == sector]['current_speed'].mean()
+            sector_idx = labels.index(sector)
+            logger.info(f"  {sector} ({bins[sector_idx]}-{bins[sector_idx+1]}°): "
+                       f"{count} records, avg {avg_speed:.2f} kt")
+        
+        # Show some actual NE examples if they exist
+        ne_currents = current_data[(current_data['current_dir'] >= 30) & 
+                                   (current_data['current_dir'] <= 60)]
+        if not ne_currents.empty:
+            logger.info(f"\nDEBUG: Found {len(ne_currents)} NE currents (030-060°)")
+            sample = ne_currents.head(3)
+            for _, row in sample.iterrows():
+                logger.info(f"  {row['datetime']}: {row['current_dir']:.0f}° @ {row['current_speed']:.2f} kt")
     
-    def analyze_current_wind_interaction(self, current_dir: float, wind_dir: float, datetime_obj: datetime = None) -> Dict:
+    def analyze_current_wind_interaction(self, current_dir: float, wind_dir: float, 
+                                   current_speed: float, datetime_obj: datetime = None) -> Dict:
         """
-        COMPREHENSIVE current-wind interaction analysis for ALL downwind conditions
-        Includes opposing, following, and cross flows that create surfable wave states
+        Analyze current-wind interaction
+        ENE winds typically 050-070°
+        Best opposition: currents 030-150° (includes NE through SE)
         """
         try:
             # Calculate angle between current and wind
@@ -1135,57 +1157,74 @@ class TidalCurrentAnalyzer:
             if angle_diff > 180:
                 angle_diff = 360 - angle_diff
             
-            # EXPANDED interaction categories for comprehensive analysis:
+            # Check if this is true eastward flow (ENE to ESE)
+            is_eastward = 60 <= current_dir <= 120  # Proper eastward range
             
-            if angle_diff <= 20:
-                interaction = "current_into_wind_strong"
-                base_enhancement = "maximum"  # Strongest opposing flow - best lumps
-                surfable = True
-            elif angle_diff <= 45:
-                interaction = "current_into_wind_moderate" 
-                base_enhancement = "excellent"  # Good opposing flow
-                surfable = True
-            elif angle_diff <= 90:
-                interaction = "current_cross_wind"
-                base_enhancement = "good"  # Cross flow can still create good conditions
-                surfable = True
-            elif angle_diff <= 135:
-                interaction = "current_angled_with_wind"
-                base_enhancement = "moderate"  # Angled flow - variable conditions
-                surfable = True
-            else:  # angle_diff > 135
-                interaction = "current_with_wind"
-                base_enhancement = "good"  # Following flow can create different wave dynamics
-                surfable = True
+            # Special handling for NE currents vs ENE winds
+            is_ne_current = 30 <= current_dir <= 60
+            typical_ene_wind = 50 <= wind_dir <= 70
             
-            # Add tidal phase enhancement
+            # Calculate tidal enhancement
             tidal_enhancement = 0.0
+            tidal_phase = "unknown"
             if datetime_obj:
                 tidal_enhancement = self._calculate_tidal_phase_enhancement(datetime_obj)
+                tidal_phase = self._get_tidal_phase_description(datetime_obj)
             
-            # Combine base enhancement with tidal phase
-            final_enhancement = self._combine_enhancements(base_enhancement, tidal_enhancement)
+            # Determine interaction type
+            if is_eastward:
+                if angle_diff <= 20:
+                    interaction = "current_into_wind_strong"
+                    base_enhancement = "maximum"
+                elif angle_diff <= 45:
+                    interaction = "current_into_wind_moderate"
+                    base_enhancement = "excellent"
+                elif angle_diff <= 90:
+                    interaction = "current_into_wind_weak"
+                    base_enhancement = "good"
+                else:
+                    interaction = "current_cross_wind"
+                    base_enhancement = "moderate"
+                    
+                # Bonus for NE current vs ENE wind (classic setup)
+                if is_ne_current and typical_ene_wind:
+                    logger.debug(f"Classic setup: NE current ({current_dir}°) vs ENE wind ({wind_dir}°)")
+                    if base_enhancement == "good":
+                        base_enhancement = "excellent"
+                    elif base_enhancement == "moderate":
+                        base_enhancement = "good"
+            else:
+                interaction = "non_optimal"
+                base_enhancement = "minimal"
             
-            # Determine if optimal for specific wave types
-            opposing_flow = angle_diff <= 45  # Current into wind
-            following_flow = angle_diff >= 135  # Current with wind
-            cross_flow = 45 < angle_diff < 135  # Cross current
+            enhancement_multiplier = 1.0 + (current_speed * 1.5 if is_eastward else 0)
             
+            # Determine if conditions are surfable
+            # Include various scenarios beyond just perfect opposition
+            surfable = False
+            if is_eastward:
+                if angle_diff <= 90:  # Current opposing or perpendicular to wind
+                    surfable = True
+                elif base_enhancement in ["maximum", "excellent", "good"]:
+                    surfable = True
+                    
             return {
                 'angle_difference': angle_diff,
                 'interaction_type': interaction,
-                'wave_enhancement': final_enhancement,
+                'wave_enhancement': base_enhancement,
+                'enhancement_multiplier': enhancement_multiplier,
                 'tidal_enhancement': tidal_enhancement,
-                'optimal_for_standing_waves': opposing_flow,  # Traditional standing wave lumps
-                'optimal_for_following_waves': following_flow,  # Following sea enhancement
-                'optimal_for_cross_waves': cross_flow,  # Cross wave patterns
-                'surfable_conditions': surfable,  # Include ALL viable conditions
-                'enhancement_category': self._categorize_enhancement(final_enhancement)
+                'tidal_phase': tidal_phase,
+                'is_eastward_current': is_eastward,
+                'is_ne_current': is_ne_current,
+                'optimal_conditions': is_eastward and angle_diff <= 90,
+                'surfable_conditions': surfable,  # Add this key that the code expects
+                'debug_info': f"Current {current_dir}° @ {current_speed:.1f}kt vs Wind {wind_dir}°"
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing current-wind interaction: {e}")
-            return {'surfable_conditions': False}
+            logger.error(f"Error analyzing interaction: {e}")
+            return {'optimal_conditions': False, 'is_eastward_current': False}
     
     def _categorize_enhancement(self, enhancement: str) -> str:
         """Categorize wave enhancement for clearer reporting"""
@@ -1200,41 +1239,65 @@ class TidalCurrentAnalyzer:
     
     def _calculate_tidal_phase_enhancement(self, dt: datetime) -> float:
         """
-        Calculate tidal phase enhancement factor based on proximity to high tide
-        High tide and 2 hours before are critical periods voyagers know matter
+        Calculate tidal phase enhancement with focus on rising tide
+        Peak enhancement: 2 hours before high tide through 30 min after
         """
-        # Calculate approximate high tide times for this location (North Shore Oahu)
-        # Using tidal harmonic constants - high tide roughly every 12.42 hours
+        # Get high tide times for this date
         high_tide_times = self._get_daily_high_tide_estimates(dt.date())
         
-        # Debug logging for tidal timing
-        logger.debug(f"High tide times for {dt.date()}: {[f'{ht:.1f}' for ht in high_tide_times]} hours")
-        
-        # Find time difference to nearest high tide
+        # Find time to nearest high tide AND whether we're before or after
         current_hour = dt.hour + dt.minute / 60.0
-        time_diffs = []
+        
+        best_enhancement = 0.0
         for ht in high_tide_times:
-            # Handle day boundary crossings
-            diff1 = abs(current_hour - ht)
-            diff2 = abs(current_hour - (ht + 24))  # Next day
-            diff3 = abs(current_hour - (ht - 24))  # Previous day
-            time_diffs.append(min(diff1, diff2, diff3))
+            # Calculate hours until this high tide
+            hours_until_high = ht - current_hour
+            
+            # Handle day boundaries
+            if hours_until_high < -12:
+                hours_until_high += 24
+            elif hours_until_high > 12:
+                hours_until_high -= 24
+            
+            # Enhancement based on position in tidal cycle
+            if -2.5 <= hours_until_high <= -0.5:  # 2.5 to 0.5 hours BEFORE high
+                # Peak enhancement zone - rising tide with maximum current
+                enhancement = 1.0  # Maximum enhancement
+                logger.debug(f"PRIME TIDAL PHASE: {abs(hours_until_high):.1f}h before high tide")
+            elif -0.5 < hours_until_high <= 0.5:  # 30 min before to 30 min after high
+                # High tide zone - good depth, slowing current
+                enhancement = 0.7
+                logger.debug(f"HIGH TIDE ZONE: {abs(hours_until_high):.1f}h from high tide")
+            elif -4.0 <= hours_until_high < -2.5:  # 4 to 2.5 hours before high
+                # Early rising tide - building enhancement
+                enhancement = 0.5
+                logger.debug(f"RISING TIDE: {abs(hours_until_high):.1f}h before high tide")
+            elif 0.5 < hours_until_high <= 1.0:  # 30-60 min after high
+                # Post-high residual enhancement
+                enhancement = 0.3
+                logger.debug(f"POST-HIGH: {hours_until_high:.1f}h after high tide")
+            else:
+                # Falling tide or slack low - minimal enhancement
+                enhancement = 0.0
+            
+            best_enhancement = max(best_enhancement, enhancement)
         
-        min_time_to_high_tide = min(time_diffs)
+        return best_enhancement   # No enhancement during other periods
+
+    def _get_tidal_phase_description(self, dt: datetime) -> str:
+        """Get human-readable tidal phase description"""
+        enhancement = self._calculate_tidal_phase_enhancement(dt)
         
-        logger.debug(f"At {dt.strftime('%H:%M')}, closest high tide is {min_time_to_high_tide:.1f}h away")
-        
-        # Apply enhancement based on proximity to high tide
-        if min_time_to_high_tide <= 0.5:  # Within 30 minutes of high tide
-            return 0.35  # Maximum enhancement at high tide
-        elif min_time_to_high_tide <= 1.0:  # Within 1 hour of high tide
-            return 0.25  # Strong enhancement near high tide
-        elif min_time_to_high_tide <= 2.0:  # Within 2 hours before high tide
-            return 0.20  # Good enhancement in the critical 2-hour window
-        elif min_time_to_high_tide <= 3.0:  # 1 hour after high tide
-            return 0.10  # Moderate enhancement post-high tide
+        if enhancement >= 0.9:
+            return "RISING-2hr"  # 2hr before high (BEST)
+        elif enhancement >= 0.6:
+            return "HIGH TIDE"   # Near peak
+        elif enhancement >= 0.4:
+            return "RISING"      # Building
+        elif enhancement >= 0.2:
+            return "POST-HIGH"   # Residual flow
         else:
-            return 0.0   # No enhancement during other periods
+            return "FALLING/LOW" # Minimal enhancement
     
     def _get_daily_high_tide_estimates(self, date_obj) -> List[float]:
         """
@@ -1432,6 +1495,9 @@ class DataCollector:
         # Collect all data
         all_data = self.collect_all_data(start_date, end_date)
         
+        # Debug: Show what data sources are available
+        logger.debug(f"Available data sources: {list(all_data.keys())}")
+        
         if not all_data:
             logger.error("CRITICAL SYSTEM ERROR: No data sources are available")
             logger.error("ASSISTANCE NEEDED: Please check internet connection and data source APIs")
@@ -1442,8 +1508,12 @@ class DataCollector:
         current_data = None
         current_source_quality = None
         
-        # Priority order: PacIOOS (forecast model) > NOAA (tidal predictions) > Simulation
-        if 'pacioos' in all_data and not all_data['pacioos'].empty:
+        # Priority order: PacIOOS Enhanced > PacIOOS > NOAA > Simulation
+        if 'pacioos_enhanced' in all_data and not all_data['pacioos_enhanced'].empty:
+            current_data = all_data['pacioos_enhanced']
+            current_source_quality = 'model_forecast'
+            logger.info("Using PacIOOS Enhanced ROMS model forecast for current data (highest quality)")
+        elif 'pacioos' in all_data and not all_data['pacioos'].empty:
             current_data = all_data['pacioos']
             current_source_quality = 'model_forecast'
             logger.info("Using PacIOOS ROMS model forecast for current data (highest quality)")
@@ -1483,6 +1553,9 @@ class DataCollector:
             current_data = self.tidal_analyzer.generate_tidal_simulation(start_date, end_date)
             current_source_quality = 'simulation'
         
+        # Debug current directions before analysis
+        self.tidal_analyzer.debug_current_directions(current_data)
+        
         # Find eastward flow periods
         eastward_periods = self.tidal_analyzer.find_eastward_flow_periods(current_data)
         
@@ -1496,6 +1569,10 @@ class DataCollector:
         for _, current_row in eastward_periods.iterrows():
             dt = current_row['datetime']
             
+            # Ensure dt is timezone-naive for comparison
+            if hasattr(dt, 'tz') and dt.tz is not None:
+                dt = dt.tz_localize(None)
+            
             # Find matching wind data with quality prioritization
             wind_dir = None
             wind_speed = None
@@ -1504,14 +1581,17 @@ class DataCollector:
             
             # Priority 1: NDBC buoy data (real observations, highest quality)
             if not wind_data.empty:
-                time_diff = abs(wind_data['datetime'] - dt)
-                if time_diff.min() <= timedelta(hours=1):
-                    closest_wind = wind_data.loc[time_diff.idxmin()]
-                    wind_dir = closest_wind['wind_dir']
-                    wind_speed = closest_wind['wind_speed']
-                    wind_source = 'NDBC_Buoy'
-                    wind_quality = 'observed'
-                    logger.debug(f"Using NDBC wind data for {dt}")
+                try:
+                    time_diff = abs(wind_data['datetime'] - dt)
+                    if time_diff.min() <= timedelta(hours=1):
+                        closest_wind = wind_data.loc[time_diff.idxmin()]
+                        wind_dir = closest_wind['wind_dir']
+                        wind_speed = closest_wind['wind_speed']
+                        wind_source = 'NDBC_Buoy'
+                        wind_quality = 'observed'
+                        logger.debug(f"Using NDBC wind data for {dt}")
+                except TypeError as e:
+                    logger.debug(f"Timezone mismatch with NDBC data: {e}")
             
             # Priority 2: NOAA Weather Buoy data (real observations, high quality)
             if (wind_dir is None or pd.isna(wind_dir)) and not noaa_weather_data.empty:
@@ -1542,8 +1622,16 @@ class DataCollector:
             
             # Analyze interaction (now includes tidal phase enhancement)
             interaction = self.tidal_analyzer.analyze_current_wind_interaction(
-                current_row['current_dir'], wind_dir, dt
+                current_row['current_dir'], wind_dir, current_row['current_speed'], dt
             )
+            
+            # Debug the interaction results
+            logger.debug(f"Interaction analysis for {dt}:")
+            logger.debug(f"  Current: {current_row['current_dir']:.0f}° @ {current_row['current_speed']:.2f}kt")
+            logger.debug(f"  Wind: {wind_dir:.0f}° @ {wind_speed:.1f}kt")
+            logger.debug(f"  Angle diff: {interaction.get('angle_difference', 'N/A'):.0f}°")
+            logger.debug(f"  Surfable: {interaction.get('surfable_conditions', False)}")
+            logger.debug(f"  Optimal: {interaction.get('optimal_conditions', False)}")
             
             # Include ALL surfable conditions - not just optimal standing waves
             if interaction.get('surfable_conditions', False):

@@ -123,6 +123,12 @@ Examples:
         help='Filter current data to daylight hours only 6 AM - 6 PM HST (requires --enhanced-currents)'
     )
     
+    parser.add_argument(
+        '--output-json',
+        action='store_true',
+        help='Output web-friendly JSON data to web/data/current.json'
+    )
+    
     return parser.parse_args()
 
 def check_data_sources(collector: DataCollector):
@@ -143,6 +149,117 @@ def check_data_sources(collector: DataCollector):
         print("This may be due to network issues or API limitations.")
     
     return len(available_sources) > 0
+
+import json
+from pathlib import Path
+
+def save_web_data(conditions_df, start_date, end_date, output_dir='web/data'):
+    """Save web-friendly JSON data for the LUMPS web interface"""
+    if conditions_df.empty:
+        return
+    
+    # Ensure web data directory exists
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Get current conditions (most recent entry)
+    current_entry = conditions_df.iloc[0] if not conditions_df.empty else None
+    
+    # Calculate score for current conditions
+    def calculate_web_score(row):
+        if row is None:
+            return 0
+        
+        score = 5  # Base score
+        
+        # Wind contribution (0-3 points)
+        wind_speed = row.get('wind_speed', 0)
+        if wind_speed >= 18:
+            score += 3
+        elif wind_speed >= 15:
+            score += 2
+        elif wind_speed >= 12:
+            score += 1
+        
+        # Current contribution (0-2 points)
+        current_speed = row.get('current_speed', 0)
+        if current_speed >= 0.3:
+            score += 2
+        elif current_speed >= 0.2:
+            score += 1
+        
+        return min(score, 10)
+    
+    def get_quality_from_score(score):
+        if score >= 8:
+            return 'EXCELLENT'
+        elif score >= 6.5:
+            return 'GOOD'
+        elif score >= 5:
+            return 'MODERATE'
+        else:
+            return 'POOR'
+    
+    # Build web data structure
+    current_score = calculate_web_score(current_entry)
+    
+    web_data = {
+        'generated': datetime.now().isoformat(),
+        'current': {
+            'score': current_score,
+            'quality': get_quality_from_score(current_score),
+            'wind': {
+                'speed': float(current_entry.get('wind_speed', 0)) if current_entry is not None else 0,
+                'direction': float(current_entry.get('wind_dir', 0)) if current_entry is not None else 0,
+                'source': current_entry.get('wind_source', 'Unknown') if current_entry is not None else 'Unknown'
+            },
+            'current': {
+                'speed': float(current_entry.get('current_speed', 0)) if current_entry is not None else 0,
+                'direction': float(current_entry.get('current_dir', 0)) if current_entry is not None else 0,
+                'source': current_entry.get('current_source', 'Unknown') if current_entry is not None else 'Unknown'
+            },
+            'enhancement': current_entry.get('enhancement', 'none') if current_entry is not None else 'none'
+        },
+        'timeline': []
+    }
+    
+    # Add timeline data with full details
+    for _, row in conditions_df.iterrows():
+        datetime_str = str(row.get('datetime', '')) if row.get('datetime') is not None else ''
+        
+        # Parse interaction data if it exists
+        interaction = row.get('interaction', {})
+        if isinstance(interaction, str):
+            # Handle case where interaction might be a string
+            interaction = {}
+        
+        web_data['timeline'].append({
+            'datetime': datetime_str,
+            'current_speed': float(row.get('current_speed', 0)),
+            'current_dir': float(row.get('current_dir', 0)),
+            'current_source': row.get('current_source', 'Unknown'),
+            'wind_speed': float(row.get('wind_speed', 0)),
+            'wind_dir': float(row.get('wind_dir', 0)),
+            'wind_source': row.get('wind_source', 'Unknown'),
+            'enhancement': row.get('enhancement', 'none'),
+            # Add new detailed data
+            'tidal_phase': row.get('tidal_phase', 'N/A'),
+            'tidal_enhancement': float(row.get('tidal_enhancement', 0)),
+            'scoring_debug': row.get('scoring_debug', 'N/A'),
+            'total_score': int(row.get('total_score', 0)),
+            'quality': row.get('quality', 'unknown'),
+            'skill_level': row.get('skill_level', 'unknown'),
+            'is_true_eastward': row.get('is_true_eastward', False),
+            'recommendation': row.get('recommendation', ''),
+            'angle_difference': float(interaction.get('angle_difference', 0)),
+            'interaction_type': interaction.get('interaction_type', 'unknown')
+        })
+    
+    # Save to JSON file
+    json_file = Path(output_dir) / 'current.json'
+    with open(json_file, 'w') as f:
+        json.dump(web_data, f, indent=2)
+    
+    print(f"💾 Web data saved to {json_file}")
 
 def main():
     """Main application entry point"""
@@ -247,6 +364,10 @@ def main():
         data_file = f"{args.output_dir}/optimal_conditions_{start_date.strftime('%Y%m%d')}.csv"
         filtered_conditions.to_csv(data_file, index=False)
         logger.info(f"Data saved to {data_file}")
+        
+        # Save web JSON data if requested
+        if args.output_json:
+            save_web_data(filtered_conditions, start_date, end_date)
         
         return 0
         
